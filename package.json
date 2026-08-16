@@ -2,6 +2,7 @@
   "name": "dsh-tauri-gui",
   "private": true,
   "version": "0.1.0",
+  "packageManager": "pnpm@11.7.0",
   "description": "DeepSeek Harness Desktop (Tauri v2) - zero-dependency desktop wrapper for @deepseek-ai/dsh",
   "type": "module",
   "scripts": {
