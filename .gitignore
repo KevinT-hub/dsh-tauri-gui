@@ -22,3 +22,15 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Official DeepSeek-Harness source tree (reference only, never shipped)
+/deepseek-harness/
+
+# Generated Tauri bundle resources (runtime archive prepared by scripts)
+/src-tauri/resources/
+
+# Local Tauri signing keypair (release uses repository secrets instead)
+/src-tauri/.tauri-signing.key
+
+# Accidental dev home created by broken path resolution (kept for safety)
+/src-tauri/.dsh-tauri-gui/

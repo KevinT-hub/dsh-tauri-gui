@@ -2,25 +2,40 @@
   "name": "dsh-tauri-gui",
   "private": true,
   "version": "0.1.0",
+  "description": "DeepSeek Harness Desktop (Tauri v2) - zero-dependency desktop wrapper for @deepseek-ai/dsh",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "runtime:prepare": "node scripts/prepare-runtime.mjs --dev",
+    "runtime:package": "node scripts/prepare-runtime.mjs --package",
+    "runtime:smoke": "node scripts/smoke-runtime.mjs",
+    "bundle:rename": "node scripts/rename-bundles.mjs"
   },
   "dependencies": {
-    "react": "^19.1.0",
-    "react-dom": "^19.1.0",
+    "@material/web": "^2.5.0",
     "@tauri-apps/api": "^2",
-    "@tauri-apps/plugin-opener": "^2"
+    "@tauri-apps/plugin-opener": "^2",
+    "@tauri-apps/plugin-process": "^2",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
   },
   "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@tauri-apps/cli": "^2",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^4.6.0",
+    "tailwindcss": "^4.3.3",
+    "tar": "^7.4.3",
     "typescript": "~5.8.3",
-    "vite": "^7.0.4",
-    "@tauri-apps/cli": "^2"
+    "vite": "^7.0.4"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
   }
 }
