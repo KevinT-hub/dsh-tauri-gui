@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "dsh-tauri-gui",
+  "productName": "DeepSeek Harness Tauri Desktop",
   "version": "0.1.0",
   "identifier": "io.github.kevint-hub.dsh-tauri-gui",
   "build": {
@@ -12,24 +12,60 @@
   "app": {
     "windows": [
       {
-        "title": "dsh-tauri-gui",
-        "width": 800,
-        "height": 600
+        "label": "main",
+        "title": "DeepSeek Harness Tauri Desktop",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 900,
+        "minHeight": 620,
+        "center": true,
+        "resizable": true,
+        "visible": false
+      },
+      {
+        "label": "update-overlay",
+        "title": "Update",
+        "width": 360,
+        "height": 132,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "focusable": false,
+        "visible": false
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost",
+      "devCsp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost ws://localhost:1420 http://localhost:1420"
     }
   },
   "bundle": {
     "active": true,
     "targets": "all",
+    "resources": [
+      "resources/runtime.tar.gz",
+      "resources/runtime.json"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/KevinT-hub/dsh-tauri-gui/releases/download/update/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQxQTA5N0Q1OTlFOUQ2MjEKUldRaDF1bVoxWmVnMGZCbzcyOFgvTVVYL2lDQXljRUxIemIyRE5HblJqc1YyYVA2QTE4ekRjS3YK",
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }
