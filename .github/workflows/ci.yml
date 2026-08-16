@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  frontend:
+    name: Frontend checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+
+  rust:
+    name: Rust checks
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libfuse2 \
+            patchelf \
+            libxdo-dev \
+            libssl-dev
+
+      - name: Install frontend dependencies
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+          pnpm run build
+
+      # tauri-build validates that bundle resources exist; runtime packaging
+      # itself is exercised by the release workflow on every platform.
+      - name: Create resource placeholders for compile-only checks
+        run: |
+          mkdir -p src-tauri/resources
+          echo '{}' > src-tauri/resources/runtime.json
+          : > src-tauri/resources/runtime.tar.gz
+
+      - name: Cargo check
+        working-directory: src-tauri
+        run: cargo check
+
+      - name: Cargo test
+        working-directory: src-tauri
+        run: cargo test --lib
+
+  runtime-smoke:
+    name: Runtime prune + end-to-end smoke
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+
+      - name: Prepare pruned runtime bundle
+        run: pnpm run runtime:package -- --target "$RUNNER_TEMP/dsh-runtime" --keep
+        env:
+          DSH_TAURI_NPM_REGISTRY: https://registry.npmjs.org
+
+      - name: Smoke test the pruned runtime
+        run: node scripts/smoke-runtime.mjs --runtime "$RUNNER_TEMP/dsh-runtime"
+        env:
+          CI: "true"

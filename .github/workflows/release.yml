@@ -1,0 +1,326 @@
+name: Release Build
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_INCREMENTAL: 0
+  RUST_BACKTRACE: short
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  check-version:
+    name: Check tag and version
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+      version: ${{ steps.resolve.outputs.version }}
+      prerelease: ${{ steps.resolve.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve tag and version
+        id: resolve
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION=$(jq -r .version package.json)
+            TAG="v${VERSION}"
+          else
+            TAG="${GITHUB_REF_NAME}"
+            VERSION="${TAG#v}"
+          fi
+          PRERELEASE="false"
+          case "${TAG,,}" in
+            *-alpha*|*-beta*|*-rc*|*-preview*|*-dev*) PRERELEASE="true" ;;
+          esac
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "prerelease=${PRERELEASE}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify tag matches package.json
+        if: github.event_name == 'push'
+        run: |
+          PKG_VERSION=$(jq -r .version package.json)
+          if [ "${GITHUB_REF_NAME,,}" != "v${PKG_VERSION,,}" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match package.json version ${PKG_VERSION}"
+            exit 1
+          fi
+
+  build:
+    name: Build ${{ matrix.artifact }}
+    needs: [check-version]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: windows-x86_64
+            bundle_platform: windows
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact: darwin-aarch64
+            bundle_platform: macos
+            bundle_arch: aarch64
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            artifact: darwin-x86_64
+            bundle_platform: macos
+            bundle_arch: x64
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            artifact: linux-x86_64
+            bundle_platform: linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install Linux dependencies
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libfuse2 \
+            patchelf \
+            libxdo-dev \
+            libssl-dev
+
+      - name: Install frontend dependencies
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+
+      - name: Prepare self-contained dsh runtime
+        run: pnpm run runtime:package
+        env:
+          DSH_TAURI_NPM_REGISTRY: https://registry.npmmirror.com
+
+      - name: Build Tauri bundles (with updater signatures)
+        run: pnpm tauri build -- --target ${{ matrix.target }}
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+      - name: Rename bundles to release naming convention
+        run: |
+          node scripts/rename-bundles.mjs \
+            --dir "src-tauri/target/${{ matrix.target }}/release/bundle" \
+            --version "${{ needs.check-version.outputs.version }}" \
+            --platform "${{ matrix.bundle_platform }}" \
+            --arch "${{ matrix.bundle_arch }}"
+
+      - name: Verify required bundle artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.check-version.outputs.version }}"
+          ROOT="src-tauri/target/${{ matrix.target }}/release/bundle"
+          case "${{ matrix.bundle_platform }}" in
+            windows)
+              FILES=(
+                "$ROOT/nsis/dsh-tauri-gui_${VERSION}_Windows_x64-setup.exe"
+                "$ROOT/nsis/dsh-tauri-gui_${VERSION}_Windows_x64-setup.exe.sig"
+                "$ROOT/msi/dsh-tauri-gui_${VERSION}_Windows_x64.msi"
+                "$ROOT/msi/dsh-tauri-gui_${VERSION}_Windows_x64.msi.sig"
+              )
+              ;;
+            macos)
+              ARCH="${{ matrix.bundle_arch }}"
+              FILES=(
+                "$ROOT/macos/dsh-tauri-gui_${VERSION}_macOS_${ARCH}.dmg"
+                "$ROOT/macos/dsh-tauri-gui_${VERSION}_macOS_${ARCH}.dmg.sig"
+                "$ROOT/macos/dsh-tauri-gui_${VERSION}_macOS_${ARCH}.app.tar.gz"
+                "$ROOT/macos/dsh-tauri-gui_${VERSION}_macOS_${ARCH}.app.tar.gz.sig"
+              )
+              ;;
+            linux)
+              FILES=(
+                "$ROOT/appimage/dsh-tauri-gui-${VERSION}-Linux-x86_64.AppImage"
+                "$ROOT/appimage/dsh-tauri-gui-${VERSION}-Linux-x86_64.AppImage.sig"
+                "$ROOT/deb/dsh-tauri-gui_${VERSION}_Linux_amd64.deb"
+                "$ROOT/deb/dsh-tauri-gui_${VERSION}_Linux_amd64.deb.sig"
+              )
+              ;;
+            *)
+              echo "::error::unknown bundle platform" >&2
+              exit 1
+              ;;
+          esac
+          for file in "${FILES[@]}"; do
+            if [ ! -f "$file" ]; then
+              echo "::error::missing required artifact: $file"
+              exit 1
+            fi
+          done
+          echo "::notice::all required artifacts present for ${{ matrix.bundle_platform }}"
+
+      - name: Upload bundles
+        uses: actions/upload-artifact@v4
+        with:
+          name: bundles-${{ matrix.artifact }}
+          if-no-files-found: error
+          path: src-tauri/target/${{ matrix.target }}/release/bundle
+
+  release:
+    name: Publish GitHub release
+    needs: [check-version, build]
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GITHUB_OWNER: KevinT-hub
+      GITHUB_REPO: dsh-tauri-gui
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Download bundles
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Show artifacts
+        run: find artifacts -type f -printf '%P\n' | sort
+
+      - name: Ensure updater release exists
+        if: needs.check-version.outputs.prerelease == 'false'
+        run: |
+          gh release create update \
+            --title "updater" \
+            --notes "Release for maintaining latest.json." \
+            --target "$GITHUB_SHA" \
+            --prerelease \
+            --latest=false 2>/dev/null || \
+          gh release edit update --prerelease --latest=false 2>/dev/null || true
+
+      - name: Create GitHub release
+        run: |
+          TAG="${{ needs.check-version.outputs.tag }}"
+          PRERELEASE="${{ needs.check-version.outputs.prerelease }}"
+          NOTES_FILE=""
+          if [ -f "RELEASE_NOTES_${TAG}.md" ]; then
+            NOTES_FILE="RELEASE_NOTES_${TAG}.md"
+          elif [ -f "RELEASE_NOTES.md" ] && grep -q "${TAG}" RELEASE_NOTES.md; then
+            NOTES_FILE="RELEASE_NOTES.md"
+          fi
+
+          if [ -n "$NOTES_FILE" ]; then
+            gh release create "$TAG" \
+              --title "DeepSeek Harness Tauri Desktop ${TAG}" \
+              --notes-file "$NOTES_FILE" \
+              --target "$GITHUB_SHA" $([ "$PRERELEASE" = "true" ] && echo --prerelease) \
+              2>/dev/null || gh release edit "$TAG" --latest 2>/dev/null || true
+          else
+            gh release create "$TAG" \
+              --title "DeepSeek Harness Tauri Desktop ${TAG}" \
+              --notes "Release ${TAG}" \
+              --target "$GITHUB_SHA" $([ "$PRERELEASE" = "true" ] && echo --prerelease) \
+              2>/dev/null || gh release edit "$TAG" --latest 2>/dev/null || true
+          fi
+
+      - name: Upload installers to GitHub release
+        run: |
+          mapfile -t ALL_FILES < <(find artifacts -type f | sort)
+          RELEASE_FILES=()
+          for f in "${ALL_FILES[@]}"; do
+            case "$f" in
+              *.exe|*.msi|*.dmg|*.deb|*.rpm|*.AppImage|*.app.tar.gz|*.sig)
+                RELEASE_FILES+=("$f")
+                ;;
+            esac
+          done
+
+          declare -A SEEN
+          UNIQUE_FILES=()
+          for f in "${RELEASE_FILES[@]}"; do
+            name=$(basename "$f")
+            if [[ -z "${SEEN[$name]+x}" ]]; then
+              SEEN[$name]=1
+              UNIQUE_FILES+=("$f")
+            fi
+          done
+
+          if [ ${#UNIQUE_FILES[@]} -eq 0 ]; then
+            echo "::error::No release files found under artifacts/"
+            exit 1
+          fi
+          gh release upload "${{ needs.check-version.outputs.tag }}" "${UNIQUE_FILES[@]}" --clobber
+
+      - name: Generate latest.json
+        run: |
+          VERSION="${{ needs.check-version.outputs.version }}"
+          TAG="${{ needs.check-version.outputs.tag }}"
+          NOTES=$(gh release view "$TAG" --json body --jq .body)
+          node scripts/update-latest.mjs \
+            --from-dir artifacts \
+            --version "$VERSION" \
+            --tag "$TAG" \
+            --notes "$NOTES"
+
+      - name: Validate latest.json update channels
+        run: |
+          node -e "
+            const fs = require('fs');
+            const data = JSON.parse(fs.readFileSync('latest.json', 'utf8'));
+            const required = {
+              'windows-x86_64': '-setup.exe',
+              'darwin-x86_64': '.app.tar.gz',
+              'darwin-aarch64': '.app.tar.gz',
+              'linux-x86_64': '.AppImage'
+            };
+            for (const [key, suffix] of Object.entries(required)) {
+              const entry = data.platforms[key];
+              if (!entry) throw new Error('missing platform ' + key);
+              if (!entry.url.endsWith(suffix)) {
+                throw new Error(key + ' url must end with ' + suffix + ': ' + entry.url);
+              }
+              if (!entry.signature || !entry.sha256) {
+                throw new Error(key + ' missing signature/sha256');
+              }
+            }
+            console.log('latest.json update channels OK:', Object.keys(data.platforms).join(', '));
+          "
+
+      - name: Upload latest.json to versioned GitHub release
+        run: |
+          TAG="${{ needs.check-version.outputs.tag }}"
+          gh release upload "$TAG" latest.json --clobber
+          if [ "${{ needs.check-version.outputs.prerelease }}" != "true" ]; then
+            gh release edit "$TAG" --latest
+          fi
+
+      - name: Upload latest.json to updater release
+        if: needs.check-version.outputs.prerelease == 'false'
+        run: |
+          gh release upload update latest.json --clobber
+          gh release edit update --prerelease --latest=false

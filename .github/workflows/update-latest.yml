@@ -1,0 +1,37 @@
+name: Update latest.json
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    name: Regenerate latest.json from the latest release
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GITHUB_OWNER: KevinT-hub
+      GITHUB_REPO: dsh-tauri-gui
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Generate latest.json from latest GitHub release
+        run: node scripts/update-latest.mjs --from-release
+
+      - name: Upload to GitHub update channel
+        run: |
+          gh release create update \
+            --title "updater" \
+            --notes "Release for maintaining latest.json." \
+            --target "$GITHUB_SHA" \
+            --prerelease \
+            --latest=false 2>/dev/null || \
+          gh release edit update --prerelease --latest=false 2>/dev/null || true
+          gh release upload update latest.json --clobber
+          gh release edit update --prerelease --latest=false
