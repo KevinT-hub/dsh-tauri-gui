@@ -335,7 +335,17 @@ async function prepareNode(target, cacheDir) {
 }
 
 function npmCli(nodeRoot) {
-  return join(nodeRoot, "node_modules", "npm", "bin", "npm-cli.js");
+  const candidates =
+    process.platform === "win32"
+      ? [join(nodeRoot, "node_modules", "npm", "bin", "npm-cli.js")]
+      : [
+          join(nodeRoot, "lib", "node_modules", "npm", "bin", "npm-cli.js"),
+          join(nodeRoot, "node_modules", "npm", "bin", "npm-cli.js"),
+        ];
+  const found = candidates.find((candidate) => existsSync(candidate));
+  if (found) return found;
+  // Return the platform-default candidate so callers surface a clear error.
+  return candidates[0];
 }
 
 function npmRegistries() {
