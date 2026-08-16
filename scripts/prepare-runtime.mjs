@@ -427,15 +427,45 @@ function installWithRegistryFallback(nodeBinaryPath, npmArgs, options, label) {
 
 function pruneNodePty(packageDir) {
   const prebuilds = join(packageDir, "prebuilds");
+  let hasCurrentPrebuild = false;
   if (existsSync(prebuilds)) {
     for (const entry of readdirSync(prebuilds, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
       if (entry.name !== PLATFORM_KEY) {
         removePath(join(prebuilds, entry.name));
+      } else if (
+        readdirSync(join(prebuilds, entry.name)).some((name) =>
+          name.endsWith(".node"),
+        )
+      ) {
+        hasCurrentPrebuild = true;
       }
     }
   }
-  for (const name of ["build", "deps", "third_party", "src", "scripts", "typings"]) {
+  const buildDir = join(packageDir, "build");
+  if (existsSync(buildDir)) {
+    if (hasCurrentPrebuild) {
+      removePath(buildDir);
+    } else {
+      // Some platforms (e.g. Linux without a usable node-pty prebuild)
+      // compile the native binary into build/Release instead. Keep only the
+      // final .node output and drop the rest of the build tree.
+      for (const entry of readdirSync(buildDir, { withFileTypes: true })) {
+        if (entry.name !== "Release") {
+          removePath(join(buildDir, entry.name));
+        }
+      }
+      const releaseDir = join(buildDir, "Release");
+      if (existsSync(releaseDir)) {
+        for (const entry of readdirSync(releaseDir, { withFileTypes: true })) {
+          if (entry.isDirectory() || !entry.name.endsWith(".node")) {
+            removePath(join(releaseDir, entry.name));
+          }
+        }
+      }
+    }
+  }
+  for (const name of ["deps", "third_party", "src", "scripts", "typings"]) {
     removePath(join(packageDir, name));
   }
 }
