@@ -3,6 +3,7 @@ name = "dsh-tauri-gui"
 version = "0.1.0"
 description = "DeepSeek Harness Tauri Desktop - zero-dependency Tauri wrapper"
 authors = ["KevinT"]
+license = "MIT"
 edition = "2021"
 
 [lib]
