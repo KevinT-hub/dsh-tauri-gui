@@ -180,6 +180,8 @@ function parseArgs(argv) {
       options.target = resolve(value);
     } else if (arg.startsWith("--target=")) {
       options.target = resolve(arg.slice("--target=".length));
+    } else if (arg === "--") {
+      // npm/pnpm `run` may forward the literal `--` separator; ignore it.
     } else {
       fail(`unknown argument: ${arg}`);
     }

@@ -86,7 +86,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Prepare pruned runtime bundle
-        run: pnpm run runtime:package -- --target "$RUNNER_TEMP/dsh-runtime" --keep
+        run: node scripts/prepare-runtime.mjs --package --target "$RUNNER_TEMP/dsh-runtime" --keep
         env:
           DSH_TAURI_NPM_REGISTRY: https://registry.npmjs.org
 
