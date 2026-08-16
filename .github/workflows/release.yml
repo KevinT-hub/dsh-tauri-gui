@@ -133,6 +133,13 @@ jobs:
       - name: Rename bundles to release naming convention
         run: node scripts/rename-bundles.mjs --dir "src-tauri/target/${{ matrix.target }}/release/bundle" --version "${{ needs.check-version.outputs.version }}" --platform "${{ matrix.bundle_platform }}" --arch "${{ matrix.bundle_arch }}"
 
+      - name: Sign macOS DMG
+        if: matrix.bundle_platform == 'macos'
+        run: pnpm exec tauri signer sign "src-tauri/target/${{ matrix.target }}/release/bundle/dmg/dsh-tauri-gui_${{ needs.check-version.outputs.version }}_macOS_${{ matrix.bundle_arch }}.dmg"
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
       - name: Verify required bundle artifacts
         shell: bash
         run: |
