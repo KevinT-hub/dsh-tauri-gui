@@ -43,7 +43,6 @@ pub fn resolve_engine_home() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
     use std::sync::Mutex;
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -51,8 +50,9 @@ mod tests {
     #[test]
     fn home_prefers_explicit_env() {
         let _guard = ENV_LOCK.lock().unwrap();
-        std::env::set_var("DSH_TAURI_GUI_HOME", "C:\\custom\\dsh-home");
-        assert_eq!(resolve_shell_home(), Path::new("C:\\custom\\dsh-home"));
+        let explicit = std::env::temp_dir().join("dsh-custom-home");
+        std::env::set_var("DSH_TAURI_GUI_HOME", &explicit);
+        assert_eq!(resolve_shell_home(), explicit);
         std::env::remove_var("DSH_TAURI_GUI_HOME");
     }
 
