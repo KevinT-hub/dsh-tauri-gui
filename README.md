@@ -8,6 +8,7 @@
 [![macOS](https://img.shields.io/badge/macOS-000000?logo=apple&logoColor=white)](#下载)
 [![Linux](https://img.shields.io/badge/Linux-FCC624?logo=linux&logoColor=black)](#下载)
 [![Community](https://img.shields.io/badge/community-non--official-orange)](#免责声明)
+[![License: MIT](https://img.shields.io/github/license/KevinT-hub/dsh-tauri-gui)](LICENSE)
 
 **[⬇️ 立即下载](https://github.com/KevinT-hub/dsh-tauri-gui/releases/latest)** · [功能一览](#功能一览) · [为什么是它](#为什么是它) · [常见问题](#常见问题)
 
@@ -111,6 +112,14 @@ pnpm tauri build
 **GitHub Actions 会产出哪些安装包？**
 
 Windows：setup.exe + msi；macOS：x64 / aarch64 dmg + 同名 app.tar.gz；Linux：AppImage + deb（另生成 rpm），均含 `.sig`。
+
+## 参与贡献
+
+欢迎提交 issue 与 PR。开发环境、自测命令与提交规范见 [CONTRIBUTING.md](CONTRIBUTING.md)；安全漏洞请通过 [SECURITY.md](SECURITY.md) 描述的私有通道报告。
+
+## 许可证
+
+本项目以 [MIT](LICENSE) 协议开源。内置的 Node.js、`@deepseek-ai/dsh` 与 pnpm 等第三方组件的许可信息见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 ## 免责声明
 
