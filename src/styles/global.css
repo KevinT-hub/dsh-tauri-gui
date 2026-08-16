@@ -1,0 +1,140 @@
+@import "tailwindcss";
+
+:root {
+  font-family:
+    "Inter", "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  --md-primary: #1f6feb;
+  --md-surface: #ffffff;
+  --md-surface-low: #f6f8fa;
+  --md-on-surface: #1f2328;
+  --md-on-surface-variant: #656d76;
+  --md-outline: #d0d7de;
+  --md-error: #cf222e;
+  --md-ok: #1a7f37;
+  --md-warn: #9a6700;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  overflow: hidden;
+}
+
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes pop-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-fade-in-up {
+  animation: fade-in-up 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.animate-fade-in {
+  animation: fade-in 0.35s ease both;
+}
+
+.animate-pop-in {
+  animation: pop-in 0.3s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Material Web components inherit the shell theme through color-scheme. */
+md-filled-button,
+md-outlined-button,
+md-circular-progress,
+md-linear-progress {
+  --md-sys-color-primary: var(--md-primary, #1f6feb);
+  --md-sys-color-on-primary: #ffffff;
+  --md-sys-color-surface: var(--md-surface, #ffffff);
+  --md-sys-color-surface-container-low: var(--md-surface-low, #f6f8fa);
+  --md-filled-button-container-shape: 8px;
+  --md-outlined-button-container-shape: 8px;
+  --md-text-button-container-shape: 8px;
+  --md-filled-button-container-height: 44px;
+  --md-outlined-button-container-height: 44px;
+  --md-text-button-container-height: 40px;
+}
+
+md-filled-button::part(button),
+md-outlined-button::part(button),
+md-text-button::part(button) {
+  white-space: nowrap;
+  padding-inline: 24px;
+  border-radius: 8px !important;
+}
+
+md-list {
+  --md-list-container-color: transparent;
+  --md-list-item-container-shape: 8px;
+}
+
+md-list-item {
+  --md-list-item-container-color: transparent;
+  --md-list-item-container-shape: 8px;
+  --md-list-item-label-text-color: var(--md-on-surface);
+  --md-list-item-supporting-text-color: var(--md-on-surface-variant);
+}
+
+:root[data-theme="dark"] {
+  --md-primary: #4dabf7;
+  --md-surface: #161b22;
+  --md-surface-low: #0d1117;
+  --md-on-surface: #e6edf3;
+  --md-on-surface-variant: #8b949e;
+  --md-outline: #30363d;
+  --md-error: #f85149;
+  --md-ok: #3fb950;
+  --md-warn: #d29922;
+}
+
+:root[data-theme="light"] {
+  --md-primary: #1f6feb;
+  --md-surface: #ffffff;
+  --md-surface-low: #f6f8fa;
+  --md-on-surface: #1f2328;
+  --md-on-surface-variant: #656d76;
+  --md-outline: #d0d7de;
+  --md-error: #cf222e;
+  --md-ok: #1a7f37;
+  --md-warn: #9a6700;
+}

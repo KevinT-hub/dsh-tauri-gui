@@ -1,51 +1,112 @@
-import { useState } from "react";
-import reactLogo from "./assets/react.svg";
-import { invoke } from "@tauri-apps/api/core";
-import "./App.css";
+import { useEffect, useRef, useState } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import BootScreen from "./features/boot/BootScreen";
+import ErrorScreen from "./features/error/ErrorScreen";
+import MinimalSplash from "./features/splash/MinimalSplash";
+import UpdateOverlay from "./features/updater/UpdateOverlay";
+import {
+  getChecklistState,
+  getShellConfig,
+  getShellStatus,
+  notifyShellReady,
+  onShellLog,
+  onShellStatus,
+} from "./shared/bridge";
+import { useTheme } from "./shared/theme";
+import type {
+  ChecklistState,
+  ShellConfig,
+  ShellLogLine,
+  ShellStatus,
+} from "./shared/types";
 
-function App() {
-  const [greetMsg, setGreetMsg] = useState("");
-  const [name, setName] = useState("");
+const MAX_LOG_LINES = 120;
 
-  async function greet() {
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    setGreetMsg(await invoke("greet", { name }));
-  }
+function useShellState() {
+  const [status, setStatus] = useState<ShellStatus>({
+    phase: "idle",
+    message: "正在连接桌面壳…",
+  });
+  const [logs, setLogs] = useState<ShellLogLine[]>([]);
+  const [config, setConfig] = useState<ShellConfig | null>(null);
 
-  return (
-    <main className="container">
-      <h1>Welcome to Tauri + React</h1>
+  useEffect(() => {
+    let disposed = false;
+    void getShellStatus().then((value) => {
+      if (!disposed) setStatus(value);
+    });
+    void getShellConfig().then((value) => {
+      if (!disposed) setConfig(value);
+    });
+    void onShellStatus((value) => {
+      if (!disposed) setStatus(value);
+    });
+    void onShellLog((value) => {
+      if (disposed) return;
+      setLogs((prev) => [...prev.slice(-(MAX_LOG_LINES - 1)), value]);
+    });
+    return () => {
+      disposed = true;
+    };
+  }, []);
 
-      <div className="row">
-        <a href="https://vite.dev" target="_blank">
-          <img src="/vite.svg" className="logo vite" alt="Vite logo" />
-        </a>
-        <a href="https://tauri.app" target="_blank">
-          <img src="/tauri.svg" className="logo tauri" alt="Tauri logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <p>Click on the Tauri, Vite, and React logos to learn more.</p>
-
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          greet();
-        }}
-      >
-        <input
-          id="greet-input"
-          onChange={(e) => setName(e.currentTarget.value)}
-          placeholder="Enter a name..."
-        />
-        <button type="submit">Greet</button>
-      </form>
-      <p>{greetMsg}</p>
-    </main>
-  );
+  return { status, logs, config, setConfig };
 }
 
-export default App;
+export default function App() {
+  const { status, logs, config, setConfig } = useShellState();
+  const theme = useTheme();
+  const logEndRef = useRef<HTMLDivElement | null>(null);
+  const [windowLabel] = useState(() => getCurrentWindow().label);
+  const [checklist, setChecklist] = useState<ChecklistState | null>(null);
+
+  useEffect(() => {
+    let disposed = false;
+    void getChecklistState().then((value) => {
+      if (!disposed) setChecklist(value);
+    });
+    return () => {
+      disposed = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    logEndRef.current?.scrollIntoView({ block: "end" });
+  }, [logs]);
+
+  useEffect(() => {
+    if (windowLabel === "update-overlay") return;
+    // Tell Rust the shell page has actually painted; only then may the
+    // checklist window be revealed (no black flash).
+    const frame = window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        void notifyShellReady();
+      });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [windowLabel]);
+
+  if (windowLabel === "update-overlay") {
+    return <UpdateOverlay />;
+  }
+
+  if (status.phase === "error") {
+    return <ErrorScreen status={status} />;
+  }
+
+  if (checklist === null || checklist.required) {
+    return (
+      <BootScreen
+        status={status}
+        logs={logs}
+        config={config}
+        theme={theme}
+        appVersion={checklist?.appVersion ?? ""}
+        onConfigChange={setConfig}
+        logEndRef={logEndRef}
+      />
+    );
+  }
+
+  return <MinimalSplash status={status} />;
+}
