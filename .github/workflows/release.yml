@@ -131,12 +131,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
       - name: Rename bundles to release naming convention
-        run: |
-          node scripts/rename-bundles.mjs \
-            --dir "src-tauri/target/${{ matrix.target }}/release/bundle" \
-            --version "${{ needs.check-version.outputs.version }}" \
-            --platform "${{ matrix.bundle_platform }}" \
-            --arch "${{ matrix.bundle_arch }}"
+        run: node scripts/rename-bundles.mjs --dir "src-tauri/target/${{ matrix.target }}/release/bundle" --version "${{ needs.check-version.outputs.version }}" --platform "${{ matrix.bundle_platform }}" --arch "${{ matrix.bundle_arch }}"
 
       - name: Verify required bundle artifacts
         shell: bash
@@ -156,8 +151,8 @@ jobs:
             macos)
               ARCH="${{ matrix.bundle_arch }}"
               FILES=(
-                "$ROOT/macos/dsh-tauri-gui_${VERSION}_macOS_${ARCH}.dmg"
-                "$ROOT/macos/dsh-tauri-gui_${VERSION}_macOS_${ARCH}.dmg.sig"
+                "$ROOT/dmg/dsh-tauri-gui_${VERSION}_macOS_${ARCH}.dmg"
+                "$ROOT/dmg/dsh-tauri-gui_${VERSION}_macOS_${ARCH}.dmg.sig"
                 "$ROOT/macos/dsh-tauri-gui_${VERSION}_macOS_${ARCH}.app.tar.gz"
                 "$ROOT/macos/dsh-tauri-gui_${VERSION}_macOS_${ARCH}.app.tar.gz.sig"
               )
