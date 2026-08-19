@@ -1,7 +1,7 @@
 pub mod bootstrap;
 pub mod runtime_update;
 
-use crate::app::config::ShellConfig;
+use crate::app::config::{RuntimeMode, ShellConfig};
 use crate::app::{self, AppState};
 use crate::core::redact::redact;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -14,6 +14,19 @@ use std::thread;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_opener::OpenerExt;
+
+/// Prevent console-subsystem child processes from opening a visible console
+/// window when the desktop shell itself is a Windows GUI application.
+/// Tauri uses the same CREATE_NO_WINDOW behavior for Windows sidecars.
+pub(crate) fn hide_console(command: &mut Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+}
 
 pub fn spawn_engine(app: &AppHandle, state: &Arc<AppState>) -> Result<(), String> {
     if state
@@ -39,23 +52,55 @@ fn workspace_dir(config: &ShellConfig) -> PathBuf {
 }
 
 fn build_path(runtime: &crate::app::RuntimeInfo, state: &AppState) -> String {
-    let node_dir = runtime
-        .node_exe
-        .parent()
-        .map(|path| path.to_path_buf())
-        .unwrap_or_else(|| state.runtime_dir.join("node"));
-    let app_bin = state.runtime_dir.join("app/node_modules/.bin");
-    let tools_bin = state.runtime_dir.join("tools/node_modules/.bin");
-    let mut parts = vec![
-        node_dir.display().to_string(),
-        app_bin.display().to_string(),
-        tools_bin.display().to_string(),
-    ];
+    let mut parts = Vec::new();
+    if let Some(node_dir) = runtime.node_exe.parent() {
+        parts.push(node_dir.display().to_string());
+    }
+    if let Some(dsh_dir) = runtime.dsh_bin.parent() {
+        parts.push(dsh_dir.display().to_string());
+    }
+    if runtime.mode == RuntimeMode::Bundled {
+        parts.push(
+            state
+                .runtime_dir
+                .join("app/node_modules/.bin")
+                .display()
+                .to_string(),
+        );
+        parts.push(
+            state
+                .runtime_dir
+                .join("tools/node_modules/.bin")
+                .display()
+                .to_string(),
+        );
+    }
     if let Some(existing) = std::env::var_os("PATH") {
         parts.push(existing.to_string_lossy().to_string());
     }
     let separator = if cfg!(windows) { ";" } else { ":" };
     parts.join(separator)
+}
+
+fn dsh_command(runtime: &crate::app::RuntimeInfo) -> Command {
+    if runtime.mode == RuntimeMode::Bundled {
+        let mut command = Command::new(&runtime.node_exe);
+        command.arg(&runtime.dsh_bin);
+        return command;
+    }
+
+    if cfg!(windows)
+        && matches!(
+            runtime.dsh_bin.extension().and_then(|value| value.to_str()),
+            Some("cmd") | Some("bat")
+        )
+    {
+        let mut command = Command::new("cmd.exe");
+        command.args(["/d", "/c"]).arg(&runtime.dsh_bin);
+        command
+    } else {
+        Command::new(&runtime.dsh_bin)
+    }
 }
 
 fn effective_port(state: &AppState) -> u16 {
@@ -110,7 +155,11 @@ fn spawn_engine_inner(app: &AppHandle, state: &Arc<AppState>) -> Result<(), Stri
         Some(app),
         "INFO",
         format!(
-            "[check] 启动引擎: node={} dsh={} port={} DSH_HOME={} cwd={}",
+            "[check] 启动引擎: runtime={} node={} dsh={} port={} DSH_HOME={} cwd={}",
+            match runtime.mode {
+                RuntimeMode::Bundled => "bundled",
+                RuntimeMode::System => "system",
+            },
             runtime.node_exe.display(),
             runtime.dsh_bin.display(),
             if port == 0 {
@@ -123,9 +172,9 @@ fn spawn_engine_inner(app: &AppHandle, state: &Arc<AppState>) -> Result<(), Stri
         ),
     );
 
-    let mut cmd = Command::new(&runtime.node_exe);
-    cmd.arg(&runtime.dsh_bin)
-        .arg("web")
+    let mut cmd = dsh_command(&runtime);
+    hide_console(&mut cmd);
+    cmd.arg("web")
         .arg("--port")
         .arg(port.to_string())
         .current_dir(workspace_dir(&config))
@@ -144,6 +193,15 @@ fn spawn_engine_inner(app: &AppHandle, state: &Arc<AppState>) -> Result<(), Stri
     let mut child = cmd
         .spawn()
         .map_err(|err| format!("无法启动引擎进程: {err}"))?;
+    // Close the stop/spawn race: `stop_engine` sets `stopping` before it
+    // takes the child, so a process spawned in that window must be killed
+    // here instead of being orphaned (an orphaned engine would keep the
+    // port alive and defeat a runtime switch on the next launch).
+    if state.stopping.load(Ordering::SeqCst) {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err("引擎启动被中断（正在停止）".to_string());
+    }
     crate::app::emit_log(
         state,
         Some(app),
@@ -183,7 +241,7 @@ fn spawn_engine_inner(app: &AppHandle, state: &Arc<AppState>) -> Result<(), Stri
 }
 
 /// Connect to an already-running official `dsh web` on the configured port,
-/// or spawn the bundled engine. Returns `true` when an existing instance was
+/// or spawn the selected runtime. Returns `true` when an existing instance was
 /// reused.
 pub fn connect_existing_or_spawn(app: &AppHandle, state: &Arc<AppState>) -> Result<bool, String> {
     let port = effective_port(state);
@@ -238,7 +296,20 @@ pub fn connect_existing_or_spawn(app: &AppHandle, state: &Arc<AppState>) -> Resu
         state,
         Some(app),
         "INFO",
-        "[check] 未发现已有实例，启动内置引擎".to_string(),
+        format!(
+            "[check] 未发现已有实例，启动{}引擎",
+            if state
+                .runtime
+                .lock()
+                .unwrap()
+                .as_ref()
+                .is_some_and(|runtime| runtime.mode == RuntimeMode::System)
+            {
+                "系统"
+            } else {
+                "内置"
+            }
+        ),
     );
     spawn_engine(app, state)?;
     Ok(false)
@@ -463,11 +534,13 @@ pub fn stop_engine(state: &Arc<AppState>) {
         state.logger.info(&format!("stopping engine (pid {pid})"));
         #[cfg(windows)]
         {
-            let status = Command::new("taskkill")
+            let mut taskkill = Command::new("taskkill");
+            taskkill
                 .args(["/PID", &pid.to_string(), "/T", "/F"])
                 .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status();
+                .stderr(Stdio::null());
+            hide_console(&mut taskkill);
+            let status = taskkill.status();
             if status.map(|s| !s.success()).unwrap_or(true) {
                 // Restricted tokens and sandboxes can deny taskkill; the
                 // child handle still allows TerminateProcess.

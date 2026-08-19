@@ -3,6 +3,19 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum RuntimeMode {
+    Bundled,
+    System,
+}
+
+impl Default for RuntimeMode {
+    fn default() -> Self {
+        Self::Bundled
+    }
+}
+
 /// Desktop-shell settings. The dsh engine itself keeps its official config
 /// (`cordis.patch.yml`, `settings.yaml`, ...) under `$DSH_HOME`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -24,6 +37,15 @@ pub struct ShellConfig {
     pub webui_port: u16,
     /// Engine data home override; `None` uses the official `~/.dsh`.
     pub engine_home: Option<String>,
+    /// Runtime source. Bundled is deterministic and recommended; system uses
+    /// node/npm/dsh discovered from the user's PATH.
+    #[serde(default)]
+    pub runtime_mode: RuntimeMode,
+    /// Whether the user has explicitly chosen a runtime on the first-run
+    /// pre-detection dialog. Once true the chooser never shows again; later
+    /// switches happen from the tray menu.
+    #[serde(default)]
+    pub runtime_mode_selected: bool,
 }
 
 impl Default for ShellConfig {
@@ -40,6 +62,8 @@ impl Default for ShellConfig {
             last_checklist_version: String::new(),
             webui_port: 3080,
             engine_home: None,
+            runtime_mode: RuntimeMode::Bundled,
+            runtime_mode_selected: false,
         }
     }
 }

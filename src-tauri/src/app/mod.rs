@@ -2,7 +2,7 @@ pub mod config;
 
 use crate::core::logging::Logger;
 use crate::update::AppUpdateInfo;
-use config::ShellConfig;
+use config::{RuntimeMode, ShellConfig};
 use serde::Serialize;
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -26,8 +26,10 @@ pub struct ShellStatus {
 
 #[derive(Clone, Debug)]
 pub struct RuntimeInfo {
+    pub mode: RuntimeMode,
     pub node_exe: PathBuf,
     pub dsh_bin: PathBuf,
+    pub node_version: String,
     pub dsh_version: String,
 }
 
@@ -51,9 +53,13 @@ pub struct AppState {
     pub first_run_marked: AtomicBool,
     pub runtime_broken: AtomicBool,
     pub webui_port_fallback: AtomicBool,
+    /// Set the first time `begin_bootstrap` runs so the frontend can safely
+    /// (re)trigger it without spawning duplicate detection tasks.
+    pub bootstrap_started: AtomicBool,
     pub tray: Mutex<Option<TrayIcon<tauri::Wry>>>,
     pub tray_menu: Mutex<Option<Menu<tauri::Wry>>>,
     pub tray_theme_menu: Mutex<Option<Submenu<tauri::Wry>>>,
+    pub tray_runtime_menu: Mutex<Option<Submenu<tauri::Wry>>>,
 }
 
 impl AppState {
@@ -93,9 +99,11 @@ impl AppState {
             first_run_marked: AtomicBool::new(false),
             runtime_broken: AtomicBool::new(false),
             webui_port_fallback: AtomicBool::new(false),
+            bootstrap_started: AtomicBool::new(false),
             tray: Mutex::new(None),
             tray_menu: Mutex::new(None),
             tray_theme_menu: Mutex::new(None),
+            tray_runtime_menu: Mutex::new(None),
         }
     }
 }

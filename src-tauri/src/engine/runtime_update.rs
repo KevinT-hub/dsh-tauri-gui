@@ -1,3 +1,4 @@
+use crate::app::config::RuntimeMode;
 use crate::app::{self, AppState, RuntimeInfo};
 use crate::core::redact::redact;
 use crate::engine;
@@ -24,12 +25,14 @@ fn node_and_runtime(state: &Arc<AppState>) -> Result<(RuntimeInfo, PathBuf), Str
         .unwrap()
         .clone()
         .ok_or_else(|| "运行时尚未就绪".to_string())?;
-    let npm_cli = state
-        .runtime_dir
-        .join("node/node_modules/npm/bin/npm-cli.js");
-    if !npm_cli.exists() {
-        return Err(format!("bundled npm missing at {}", npm_cli.display()));
+    if runtime.mode != RuntimeMode::Bundled {
+        return Err(
+            "dsh hot updates are disabled in system runtime mode; update dsh with your system package manager"
+                .to_string(),
+        );
     }
+    let npm_cli = crate::engine::bootstrap::npm_cli_path(&state.runtime_dir)
+        .ok_or_else(|| format!("bundled npm missing under {}", state.runtime_dir.display()))?;
     Ok((runtime, npm_cli))
 }
 
@@ -70,10 +73,10 @@ pub fn check(state: &Arc<AppState>) -> Result<RuntimeUpdateCheck, String> {
 
     for registry in registry_candidates(state) {
         let url = format!("{registry}/@deepseek-ai/dsh/latest");
-        match Command::new(&runtime.node_exe)
-            .args(["-e", FETCH_SCRIPT, &url])
-            .output()
-        {
+        let mut command = Command::new(&runtime.node_exe);
+        command.args(["-e", FETCH_SCRIPT, &url]);
+        engine::hide_console(&mut command);
+        match command.output() {
             Ok(output) if output.status.success() => {
                 latest = Some(
                     String::from_utf8(output.stdout)
@@ -98,7 +101,7 @@ pub fn check(state: &Arc<AppState>) -> Result<RuntimeUpdateCheck, String> {
 
     let latest =
         latest.ok_or_else(|| last_error.unwrap_or_else(|| "无可用 npm registry".to_string()))?;
-    let current = crate::engine::bootstrap::read_dsh_version(&state.runtime_dir)?;
+    let current = runtime.dsh_version.clone();
     Ok(RuntimeUpdateCheck {
         current: current.clone(),
         latest: latest.clone(),
@@ -183,6 +186,7 @@ fn run_npm_install(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    engine::hide_console(&mut cmd);
 
     let mut child = cmd
         .spawn()

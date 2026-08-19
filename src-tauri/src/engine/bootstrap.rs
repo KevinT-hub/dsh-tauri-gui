@@ -1,3 +1,4 @@
+use crate::app::config::RuntimeMode;
 use crate::app::{AppState, RuntimeInfo};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File};
@@ -25,6 +26,84 @@ fn node_path(runtime_dir: &Path) -> PathBuf {
     } else {
         runtime_dir.join("node/bin/node")
     }
+}
+
+pub fn npm_cli_path(runtime_dir: &Path) -> Option<PathBuf> {
+    let candidates = if cfg!(windows) {
+        vec![runtime_dir.join("node/node_modules/npm/bin/npm-cli.js")]
+    } else {
+        vec![
+            runtime_dir.join("node/lib/node_modules/npm/bin/npm-cli.js"),
+            runtime_dir.join("node/node_modules/npm/bin/npm-cli.js"),
+        ]
+    };
+    candidates.into_iter().find(|path| path.is_file())
+}
+
+fn find_on_path(name: &str) -> Option<PathBuf> {
+    let names = if cfg!(windows) {
+        vec![
+            format!("{name}.exe"),
+            format!("{name}.cmd"),
+            format!("{name}.bat"),
+            name.to_string(),
+        ]
+    } else {
+        vec![name.to_string()]
+    };
+    let path = std::env::var_os("PATH")?;
+    for directory in std::env::split_paths(&path) {
+        for candidate in &names {
+            let full = directory.join(candidate);
+            if full.is_file() {
+                return Some(full);
+            }
+        }
+    }
+    None
+}
+
+fn run_version_command(path: &Path, label: &str) -> Result<String, String> {
+    let mut command = if cfg!(windows)
+        && matches!(
+            path.extension().and_then(|value| value.to_str()),
+            Some("cmd") | Some("bat")
+        ) {
+        let mut command = Command::new("cmd.exe");
+        command.args(["/d", "/c"]).arg(path).arg("--version");
+        command
+    } else {
+        let mut command = Command::new(path);
+        command.arg("--version");
+        command
+    };
+    crate::engine::hide_console(&mut command);
+    let output = command
+        .output()
+        .map_err(|err| format!("cannot run system {label} at {}: {err}", path.display()))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "system {label} --version failed with {:?}: {}",
+            output.status.code(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let version = stdout
+        .lines()
+        .chain(stderr.lines())
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .ok_or_else(|| format!("system {label} returned an empty version"))?;
+    Ok(version.to_string())
+}
+
+fn required_system_command(name: &str) -> Result<PathBuf, String> {
+    find_on_path(name).ok_or_else(|| {
+        format!("system {name} was not found on PATH; install it or switch runtime mode to bundled")
+    })
 }
 
 pub fn resolve_dsh_bin(package_dir: &Path) -> Result<PathBuf, String> {
@@ -65,8 +144,10 @@ pub fn read_node_version(runtime_dir: &Path) -> Result<String, String> {
     // This also verifies that the bundled binary actually runs.
     let node_exe = node_path(runtime_dir);
     if node_exe.exists() {
-        let output = Command::new(&node_exe)
-            .arg("--version")
+        let mut command = Command::new(&node_exe);
+        command.arg("--version");
+        crate::engine::hide_console(&mut command);
+        let output = command
             .output()
             .map_err(|err| format!("cannot run {}: {err}", node_exe.display()))?;
         if !output.status.success() {
@@ -198,9 +279,36 @@ pub fn runtime_info(runtime_dir: &Path) -> Result<RuntimeInfo, String> {
         return Err(format!("@deepseek-ai/dsh missing at {}", dsh_bin.display()));
     }
     Ok(RuntimeInfo {
+        mode: RuntimeMode::Bundled,
         node_exe,
         dsh_bin,
+        node_version,
         dsh_version: read_dsh_version(runtime_dir)?,
+    })
+}
+
+pub fn system_runtime_info() -> Result<RuntimeInfo, String> {
+    let node_exe = required_system_command("node")?;
+    let npm_exe = required_system_command("npm")?;
+    let dsh_bin = required_system_command("dsh")?;
+
+    let node_output = run_version_command(&node_exe, "Node.js")?;
+    let node_version = parse_node_version_output(&node_output)
+        .ok_or_else(|| format!("cannot parse system Node.js version: {node_output}"))?;
+    if !node_version_supported(&node_version) {
+        return Err(format!(
+            "system Node.js {node_version} does not satisfy dsh requirement (^22.19.0 || >=24)"
+        ));
+    }
+    let _npm_version = run_version_command(&npm_exe, "npm")?;
+    let dsh_version = run_version_command(&dsh_bin, "dsh")?;
+
+    Ok(RuntimeInfo {
+        mode: RuntimeMode::System,
+        node_exe,
+        dsh_bin,
+        node_version,
+        dsh_version,
     })
 }
 
@@ -209,7 +317,11 @@ fn read_manifest(path: &Path) -> Option<RuntimeManifest> {
     serde_json::from_str(&text).ok()
 }
 
-fn bundled_archive(app: &AppHandle) -> Option<PathBuf> {
+/// Locate the bundled runtime archive (`runtime.tar.gz`) shipped with the
+/// app, if present. `None` means the archive is not available (e.g. dev
+/// builds without `runtime:prepare`), in which case the bundled runtime must
+/// already be extracted locally.
+pub fn bundled_archive(app: &AppHandle) -> Option<PathBuf> {
     let mut candidates: Vec<PathBuf> = Vec::new();
     if let Ok(resource_dir) = app.path().resource_dir() {
         candidates.push(resource_dir.join(RUNTIME_ARCHIVE));
@@ -408,6 +520,22 @@ fn cleanup_runtime_leftovers(runtime_dir: &Path) {
 /// update), so updates never force a re-download/re-extract. Extraction only
 /// happens when the local runtime is missing or unusable.
 pub async fn ensure_runtime(app: AppHandle, state: Arc<AppState>) -> Result<RuntimeInfo, String> {
+    if state.config.lock().unwrap().runtime_mode == RuntimeMode::System {
+        let info = system_runtime_info()?;
+        crate::app::emit_log(
+            &state,
+            Some(&app),
+            "INFO",
+            format!(
+                "[check] using system runtime: node={} dsh={} node=v{} dsh={}",
+                info.node_exe.display(),
+                info.dsh_bin.display(),
+                info.node_version,
+                info.dsh_version
+            ),
+        );
+        return Ok(info);
+    }
     cleanup_runtime_leftovers(&state.runtime_dir);
     if let Ok(info) = runtime_info(&state.runtime_dir) {
         if let (Some(bundled), Some(local)) = (

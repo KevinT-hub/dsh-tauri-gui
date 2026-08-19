@@ -89,8 +89,9 @@ pub fn run() {
             ui::theme::spawn_theme_watcher(app.handle().clone(), state.clone());
             ui::theme::sync_window_theme(app.handle(), &state);
 
-            let handle = app.handle().clone();
-            engine::bootstrap::startup(handle, state.clone());
+            // Detection/engine bootstrap is deferred until the frontend has
+            // settled the runtime mode (see the `begin_bootstrap` command),
+            // so the one-time runtime choice can be made *before* detection.
             schedule_app_update_check(app.handle().clone(), state);
             Ok(())
         })
@@ -123,6 +124,7 @@ pub fn run() {
             commands::shell::checklist_state,
             commands::shell::shell_ready,
             commands::shell::enter_harness,
+            commands::shell::begin_bootstrap,
             commands::shell::restart_engine,
             commands::shell::open_logs_dir,
             commands::shell::open_web_ui,

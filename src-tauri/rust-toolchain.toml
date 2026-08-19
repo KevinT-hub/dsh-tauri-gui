@@ -1,0 +1,10 @@
+# Pinned Rust toolchain for reproducible CI builds (CI and release workflows
+# read this file via dtolnay/rust-toolchain). Bump deliberately, never let
+# "stable" drift between local builds and releases.
+#
+# 1.93.0 is the minimum that satisfies every crate in Cargo.lock
+# (plist/time/serde_with require rustc >= 1.88) and matches the local
+# developer toolchain so CI and local builds behave identically.
+[toolchain]
+channel = "1.93.0"
+components = ["clippy", "rustfmt"]
