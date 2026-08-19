@@ -10,6 +10,13 @@
  *     Prepares a fresh runtime and packs it into
  *     src-tauri/resources/runtime.tar.gz + runtime.json for the installer.
  *
+ *   node scripts/prepare-runtime.mjs --test-resource
+ *     Writes explicit compile-only placeholders into src-tauri/resources
+ *     (runtime.json marked `testMode: true` and a minimal valid gzip file).
+ *     Used by CI for `cargo check`/`cargo test` only; the release workflow
+ *     always replaces them with a real packed runtime, and release asserts
+ *     the placeholders were not carried over.
+ *
  * The packed runtime is generated on the target OS/arch (native modules such
  * as node-pty ship per-platform binaries), so CI builds one installer per
  * platform from this script.
@@ -32,8 +39,9 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { gzipSync } from "node:zlib";
 import * as tar from "tar";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -163,6 +171,7 @@ function parseArgs(argv) {
     dev: false,
     package: false,
     prune: false,
+    testResource: false,
     target: null,
     keep: false,
     refresh: false,
@@ -172,6 +181,7 @@ function parseArgs(argv) {
     if (arg === "--dev") options.dev = true;
     else if (arg === "--package") options.package = true;
     else if (arg === "--prune") options.prune = true;
+    else if (arg === "--test-resource") options.testResource = true;
     else if (arg === "--keep") options.keep = true;
     else if (arg === "--refresh") options.refresh = true;
     else if (arg === "--target") {
@@ -186,8 +196,8 @@ function parseArgs(argv) {
       fail(`unknown argument: ${arg}`);
     }
   }
-  if ([options.dev, options.package, options.prune].filter(Boolean).length > 1) {
-    fail("--dev, --package and --prune are mutually exclusive");
+  if ([options.dev, options.package, options.prune, options.testResource].filter(Boolean).length > 1) {
+    fail("--dev, --package, --prune and --test-resource are mutually exclusive");
   }
   if (options.package) {
     options.target ??= join(tmpdir(), `dsh-runtime-prepare-${process.pid}`);
@@ -198,13 +208,46 @@ function parseArgs(argv) {
   return options;
 }
 
+/**
+ * Compile-only resource placeholders for CI (cargo check / cargo test).
+ * These must never reach a release: the release workflow always runs
+ * `runtime:package` and additionally asserts `runtime.json` has no
+ * `testMode` marker before building installers.
+ */
+function writeTestResources() {
+  mkdirSync(SRC_TAURI_RESOURCES, { recursive: true });
+  const manifest = {
+    testMode: true,
+    createdAt: new Date().toISOString(),
+    note: "compile-only placeholder; replaced by runtime:package in release builds",
+  };
+  writeFileSync(
+    join(SRC_TAURI_RESOURCES, "runtime.json"),
+    `${JSON.stringify(manifest, null, 2)}\n`,
+  );
+  // A minimal valid gzip stream (empty tar payload), still a real gzip file.
+  writeFileSync(
+    join(SRC_TAURI_RESOURCES, "runtime.tar.gz"),
+    gzipSync(Buffer.alloc(0)),
+  );
+  console.log(
+    `[runtime] wrote compile-only placeholders to ${SRC_TAURI_RESOURCES} (testMode=true)`,
+  );
+}
+
 function extractArchive(archivePath, extractDir) {
+  const archiveName = basename(archivePath);
+  const archiveCwd = dirname(archivePath);
   if (archivePath.endsWith(".zip")) {
-    // Windows ships bsdtar which reads zip archives natively; passing paths
-    // as argv avoids shell-quoting issues entirely.
-    run("tar", ["-xf", archivePath, "-C", extractDir]);
+    if (process.platform === "win32") {
+      const quote = (value) => `'${value.replaceAll("'", "''")}'`;
+      const command = `Expand-Archive -LiteralPath ${quote(archivePath)} -DestinationPath ${quote(extractDir)} -Force`;
+      run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", command]);
+    } else {
+      run("tar", ["-xf", archiveName, "-C", extractDir], { cwd: archiveCwd });
+    }
   } else {
-    run("tar", ["-xzf", archivePath, "-C", extractDir]);
+    run("tar", ["-xzf", archiveName, "-C", extractDir], { cwd: archiveCwd });
   }
 }
 
@@ -524,9 +567,27 @@ function pruneRuntime(target) {
   pruneNodeModules(join(target, "app", "node_modules"));
   pruneNodeModules(join(target, "tools", "node_modules"));
   pruneNodeModules(join(target, "node", "node_modules"));
-  for (const name of ["README.md", "CHANGELOG.md", "install_tools.bat", "corepack", "corepack.cmd", "corepack.ps1"]) {
+  for (const name of [
+    "README.md",
+    "CHANGELOG.md",
+    "install_tools.bat",
+    "corepack",
+    "corepack.cmd",
+    "corepack.ps1",
+    "node_modules/corepack",
+    "node_modules/npm/docs",
+    "node_modules/npm/man",
+    "node_modules/npm/html",
+    "node_modules/npm/changelogs",
+    "node_modules/npm/test",
+    "node_modules/npm/tests",
+  ]) {
     removePath(join(target, "node", name));
   }
+  // These lockfiles describe the build-time install and are never read by
+  // the desktop engine or its staging updater.
+  removePath(join(target, "app", "package-lock.json"));
+  removePath(join(target, "tools", "package-lock.json"));
   const seconds = ((Date.now() - started) / 1000).toFixed(1);
   console.log(`[runtime] prune finished in ${seconds}s`);
 }
@@ -574,7 +635,7 @@ async function packageRuntime(target) {
     {
       cwd: target,
       file: archivePath,
-      gzip: true,
+      gzip: { level: 9 },
       portable: true,
       noMtime: true,
       filter: (path) =>
@@ -598,6 +659,10 @@ async function packageRuntime(target) {
 
 async function main() {
   const options = parseArgs(process.argv.slice(2));
+  if (options.testResource) {
+    writeTestResources();
+    return;
+  }
   const target = options.target ?? defaultTarget();
   if (options.prune) {
     pruneRuntime(target);
