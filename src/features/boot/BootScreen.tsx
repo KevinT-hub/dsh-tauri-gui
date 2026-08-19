@@ -111,6 +111,10 @@ function deriveChecks(status: ShellStatus): CheckItem[] {
     case "error": {
       const detail = `${status.detail ?? ""} ${status.message}`;
       const index = detail.includes("运行时")
+        || detail.includes("system Node")
+        || detail.includes("system npm")
+        || detail.includes("system dsh")
+        || detail.includes("bundled runtime")
         ? 1
         : detail.includes("dsh") || detail.includes("核心")
           ? 2
@@ -306,6 +310,32 @@ export default function BootScreen({
             </div>
           </div>
 
+          {config && (
+            <div className="space-y-2 rounded-xl border border-[var(--md-outline)] bg-[var(--md-surface)] p-4 text-xs text-[var(--md-on-surface-variant)]">
+              <p className="font-medium text-[var(--md-on-surface)]">运行时</p>
+              <div className="flex items-center gap-2">
+                <span
+                  className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                    config.runtimeMode === "bundled"
+                      ? "bg-[var(--md-primary)]/15 text-[var(--md-primary)]"
+                      : "bg-[var(--md-surface-low)] text-[var(--md-on-surface-variant)]"
+                  }`}
+                >
+                  {config.runtimeMode === "bundled"
+                    ? "内置运行时（推荐）"
+                    : "系统运行时"}
+                </span>
+                {config.runtimeMode === "system" && (
+                  <span className="text-[var(--md-warn)]">
+                    系统模式不会修改全局 npm 包，dsh 更新由系统环境自行管理。
+                  </span>
+                )}
+              </div>
+              <p>
+                如需在两种运行时之间切换，请使用系统托盘菜单中的「运行时」。切换将在应用重启后生效。
+              </p>
+            </div>
+          )}
           {config && (
             <label className="flex cursor-pointer items-center gap-2 text-xs text-[var(--md-on-surface-variant)] select-none">
               <input

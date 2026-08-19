@@ -27,6 +27,8 @@ export interface RuntimeUpdateCheck {
   updateAvailable: boolean;
 }
 
+export type RuntimeMode = "bundled" | "system";
+
 export interface ShellConfig {
   minimizeToTray: boolean;
   autoStartEngine: boolean;
@@ -39,6 +41,8 @@ export interface ShellConfig {
   lastChecklistVersion: string;
   webuiPort: number;
   engineHome: string | null;
+  runtimeMode: RuntimeMode;
+  runtimeModeSelected: boolean;
 }
 
 export interface ChecklistState {
@@ -50,6 +54,7 @@ export interface Diagnostics {
   appVersion: string;
   dshVersion: string | null;
   nodeVersion: string | null;
+  runtimeMode: RuntimeMode | null;
   shellHome: string;
   engineHome: string;
   runtimeDir: string;

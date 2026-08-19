@@ -1,10 +1,12 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import BootScreen from "./features/boot/BootScreen";
+import RuntimeChoiceDialog from "./features/boot/RuntimeChoiceDialog";
 import ErrorScreen from "./features/error/ErrorScreen";
 import MinimalSplash from "./features/splash/MinimalSplash";
 import UpdateOverlay from "./features/updater/UpdateOverlay";
 import {
+  beginBootstrap,
   getChecklistState,
   getShellConfig,
   getShellStatus,
@@ -59,6 +61,16 @@ export default function App() {
   const logEndRef = useRef<HTMLDivElement | null>(null);
   const [windowLabel] = useState(() => getCurrentWindow().label);
   const [checklist, setChecklist] = useState<ChecklistState | null>(null);
+  const bootstrapRef = useRef(false);
+
+  // Begin the environment detection / engine bootstrap exactly once. The
+  // runtime mode must be settled first (see RuntimeChoiceDialog), so this is
+  // triggered either after the one-time choice or immediately on later runs.
+  const triggerBootstrap = useCallback(() => {
+    if (bootstrapRef.current) return;
+    bootstrapRef.current = true;
+    void beginBootstrap();
+  }, []);
 
   useEffect(() => {
     let disposed = false;
@@ -69,6 +81,14 @@ export default function App() {
       disposed = true;
     };
   }, []);
+
+  useEffect(() => {
+    // On runs where the runtime was already chosen, start detection as soon
+    // as the config is known. The first-run dialog triggers it itself.
+    if (config?.runtimeModeSelected) {
+      triggerBootstrap();
+    }
+  }, [config, triggerBootstrap]);
 
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ block: "end" });
@@ -95,6 +115,17 @@ export default function App() {
   }
 
   if (checklist === null || checklist.required) {
+    // The one-time runtime chooser appears *before* detection on first run.
+    if (config && !config.runtimeModeSelected) {
+      return (
+        <RuntimeChoiceDialog
+          config={config}
+          appVersion={checklist?.appVersion ?? ""}
+          onConfigChange={setConfig}
+          onConfirm={triggerBootstrap}
+        />
+      );
+    }
     return (
       <BootScreen
         status={status}

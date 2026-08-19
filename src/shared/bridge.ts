@@ -28,6 +28,10 @@ export function restartEngine(): Promise<void> {
   return invoke("restart_engine");
 }
 
+export function beginBootstrap(): Promise<void> {
+  return invoke("begin_bootstrap");
+}
+
 export function openLogsDir(): Promise<void> {
   return invoke("open_logs_dir");
 }

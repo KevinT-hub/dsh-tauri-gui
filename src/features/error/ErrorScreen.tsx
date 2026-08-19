@@ -13,6 +13,7 @@ function buildReport(diag: Diagnostics): string {
     `应用版本: ${diag.appVersion}`,
     `dsh 核心: ${diag.dshVersion ?? "未知"}`,
     `Node 版本: ${diag.nodeVersion ?? "未知"}`,
+    `Runtime mode: ${diag.runtimeMode ?? "unknown"}`,
     `桌面壳目录: ${diag.shellHome}`,
     `引擎数据目录: ${diag.engineHome}`,
     `运行时目录: ${diag.runtimeDir}`,
