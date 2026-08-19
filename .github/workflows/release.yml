@@ -3,8 +3,25 @@ name: Release Build
 on:
   push:
     tags:
-      - 'v*'
+      - 'v*.*.*'
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Version tag to release, e.g. v1.2.3 or v1.2.3-rc.1. Must already exist and point at source_ref.'
+        required: true
+      source_ref:
+        description: 'Git ref (branch name or commit SHA) the release builds from. Must match the tag commit.'
+        required: false
+        default: 'main'
+      publish_mode:
+        description: 'draft keeps the release hidden; prerelease/stable publish immediately. stable requires production-release environment approval.'
+        required: false
+        default: 'draft'
+        type: choice
+        options:
+          - draft
+          - prerelease
+          - stable
 
 permissions:
   contents: write
@@ -12,54 +29,165 @@ permissions:
 env:
   CARGO_INCREMENTAL: 0
   RUST_BACKTRACE: short
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  check-version:
-    name: Check tag and version
+  # ---------------------------------------------------------------------
+  # 1. resolve-release: strict SemVer parse, version-file consistency,
+  #    tag commit / source branch validation, existing-release check.
+  # ---------------------------------------------------------------------
+  resolve-release:
+    name: Resolve and validate release
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.resolve.outputs.tag }}
       version: ${{ steps.resolve.outputs.version }}
-      prerelease: ${{ steps.resolve.outputs.prerelease }}
+      channel: ${{ steps.resolve.outputs.channel }}
+      is_prerelease: ${{ steps.resolve.outputs.is_prerelease }}
+      base_version: ${{ steps.resolve.outputs.base_version }}
+      source_sha: ${{ steps.resolve.outputs.source_sha }}
+      release_exists: ${{ steps.check-existing.outputs.release_exists }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event_name == 'push' && github.ref_name || inputs.source_ref }}
 
       - name: Resolve tag and version
         id: resolve
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSION=$(jq -r .version package.json)
-            TAG="v${VERSION}"
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "push" ]; then
+            TAG="${{ github.ref_name }}"
           else
-            TAG="${GITHUB_REF_NAME}"
-            VERSION="${TAG#v}"
+            TAG="${{ inputs.tag }}"
+            if [ -z "$TAG" ]; then
+              echo "::error::workflow_dispatch requires inputs.tag (e.g. v1.2.3)"
+              exit 1
+            fi
           fi
-          PRERELEASE="false"
-          case "${TAG,,}" in
-            *-alpha*|*-beta*|*-rc*|*-preview*|*-dev*) PRERELEASE="true" ;;
-          esac
-          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "prerelease=${PRERELEASE}" >> "$GITHUB_OUTPUT"
+          node scripts/release-version.mjs parse "$TAG" --output "$GITHUB_OUTPUT"
 
-      - name: Verify tag matches package.json
-        if: github.event_name == 'push'
+      - name: Verify version files agree
         run: |
-          PKG_VERSION=$(jq -r .version package.json)
-          if [ "${GITHUB_REF_NAME,,}" != "v${PKG_VERSION,,}" ]; then
-            echo "::error::Tag ${GITHUB_REF_NAME} does not match package.json version ${PKG_VERSION}"
+          set -euo pipefail
+          node scripts/release-version.mjs check-files \
+            --version "${{ steps.resolve.outputs.version }}"
+
+      - name: Validate publish_mode vs channel
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          set -euo pipefail
+          if [ "${{ inputs.publish_mode }}" = "stable" ] && \
+             [ "${{ steps.resolve.outputs.is_prerelease }}" = "true" ]; then
+            echo "::error::publish_mode=stable requires a stable tag (no prerelease)"
             exit 1
           fi
 
+      - name: Validate tag commit and source branch
+        id: validate-tag
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.resolve.outputs.tag }}"
+          PRERELEASE="${{ steps.resolve.outputs.is_prerelease }}"
+          git fetch --tags --prune --force origin "+refs/heads/*:refs/remotes/origin/*"
+          TAG_COMMIT=$(git rev-list -n 1 "$TAG" 2>/dev/null || {
+            echo "::error::tag ${TAG} not found; push it first"
+            exit 1
+          })
+          echo "source_sha=${TAG_COMMIT}" >> "$GITHUB_OUTPUT"
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ "$TAG_COMMIT" != "$GITHUB_SHA" ]; then
+              echo "::error::tag ${TAG} points to ${TAG_COMMIT} but source_ref is ${GITHUB_SHA}; pass the ref the tag points at"
+              exit 1
+            fi
+          fi
+
+          IS_ANCESTOR=0
+          if git merge-base --is-ancestor "$TAG_COMMIT" refs/remotes/origin/main; then
+            IS_ANCESTOR=1
+          elif [ "$PRERELEASE" = "true" ]; then
+            for r in $(git for-each-ref --format='%(refname)' refs/remotes/origin/release); do
+              if git merge-base --is-ancestor "$TAG_COMMIT" "$r"; then
+                IS_ANCESTOR=1
+                break
+              fi
+            done
+          fi
+          if [ "$IS_ANCESTOR" = "0" ]; then
+            echo "::error::tag ${TAG} is not an ancestor of origin/main$([ "$PRERELEASE" = "true" ] && echo ' or origin/release/*')"
+            exit 1
+          fi
+          echo "::notice::tag ${TAG} (${TAG_COMMIT}) validated"
+
+      - name: Check for existing release
+        id: check-existing
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.resolve.outputs.tag }}"
+          if gh release view "$TAG" --json tagName,targetCommitish >/dev/null 2>/tmp/release_query.err; then
+            TARGET=$(gh release view "$TAG" --json targetCommitish --jq .targetCommitish)
+            TAG_COMMIT="${{ steps.validate-tag.outputs.source_sha }}"
+            if [ "$TARGET" != "$TAG_COMMIT" ]; then
+              echo "::error::release ${TAG} already exists targeting ${TARGET}, but tag points at ${TAG_COMMIT}"
+              exit 1
+            fi
+            echo "release_exists=true" >> "$GITHUB_OUTPUT"
+          elif grep -qi "not found" /tmp/release_query.err; then
+            echo "release_exists=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::failed to query release ${TAG}: $(cat /tmp/release_query.err)"
+            exit 1
+          fi
+
+  # ---------------------------------------------------------------------
+  # 2. prepare-release: create (or read) the draft release, record release_id.
+  #    Stable releases go through the `production-release` environment so
+  #    required reviewers can gate them; prereleases use a permissive env.
+  # ---------------------------------------------------------------------
+  prepare-release:
+    name: Prepare draft release
+    needs: [resolve-release]
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ needs.resolve-release.outputs.is_prerelease == 'false' && 'production-release' || 'prerelease-release' }}
+    outputs:
+      release_id: ${{ steps.ensure-draft.outputs.release_id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve-release.outputs.source_sha }}
+
+      - name: Ensure draft release exists
+        id: ensure-draft
+        run: |
+          set -euo pipefail
+          TAG="${{ needs.resolve-release.outputs.tag }}"
+          PRERELEASE="${{ needs.resolve-release.outputs.is_prerelease }}"
+          SHA="${{ needs.resolve-release.outputs.source_sha }}"
+          NOTES_ARGS=()
+          if [ -f "RELEASE_NOTES_${TAG}.md" ]; then
+            NOTES_ARGS=(--notes-file "RELEASE_NOTES_${TAG}.md")
+          elif [ -f "RELEASE_NOTES.md" ] && grep -q "${TAG}" RELEASE_NOTES.md; then
+            NOTES_ARGS=(--notes-file RELEASE_NOTES.md)
+          fi
+          node scripts/reconcile-release-state.mjs ensure-draft \
+            --tag "$TAG" --prerelease "$PRERELEASE" --target "$SHA" \
+            "${NOTES_ARGS[@]}" --output "$GITHUB_OUTPUT"
+
+  # ---------------------------------------------------------------------
+  # 3. build: platform matrix. Every platform builds the exact tag commit
+  #    with the pinned Rust toolchain and produces a bundle-manifest.json.
+  # ---------------------------------------------------------------------
   build:
     name: Build ${{ matrix.artifact }}
-    needs: [check-version]
+    needs: [resolve-release]
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
@@ -82,9 +210,10 @@ jobs:
             target: x86_64-unknown-linux-gnu
             artifact: linux-x86_64
             bundle_platform: linux
-    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve-release.outputs.source_sha }}
 
       - uses: pnpm/action-setup@v4
         with:
@@ -95,6 +224,7 @@ jobs:
           node-version: 22
           cache: pnpm
 
+      # Rust channel comes from src-tauri/rust-toolchain.toml (pinned).
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -124,6 +254,24 @@ jobs:
         env:
           DSH_TAURI_NPM_REGISTRY: https://registry.npmmirror.com
 
+      # Guards against compile-only placeholders (from --test-resource) ever
+      # reaching a release build.
+      - name: Assert runtime resources are real
+        run: |
+          set -euo pipefail
+          node -e "
+            const fs = require('fs');
+            const m = JSON.parse(fs.readFileSync('src-tauri/resources/runtime.json', 'utf8'));
+            if (m.testMode) {
+              throw new Error('compile-only placeholder leaked into release build');
+            }
+            const st = fs.statSync('src-tauri/resources/runtime.tar.gz');
+            if (st.size < 1024 * 1024) {
+              throw new Error('runtime.tar.gz looks like a placeholder (' + st.size + ' bytes)');
+            }
+            console.log('runtime resources OK (' + st.size + ' bytes)');
+          "
+
       - name: Build Tauri bundles (with updater signatures)
         run: pnpm exec tauri build --target ${{ matrix.target }}
         env:
@@ -131,59 +279,46 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
       - name: Rename bundles to release naming convention
-        run: node scripts/rename-bundles.mjs --dir "src-tauri/target/${{ matrix.target }}/release/bundle" --version "${{ needs.check-version.outputs.version }}" --platform "${{ matrix.bundle_platform }}" --arch "${{ matrix.bundle_arch }}"
+        run: node scripts/rename-bundles.mjs \
+          --dir "src-tauri/target/${{ matrix.target }}/release/bundle" \
+          --version "${{ needs.resolve-release.outputs.version }}" \
+          --platform "${{ matrix.bundle_platform }}" \
+          --arch "${{ matrix.bundle_arch }}" \
+          --target "${{ matrix.target }}"
 
       - name: Sign macOS DMG
         if: matrix.bundle_platform == 'macos'
-        run: pnpm exec tauri signer sign "src-tauri/target/${{ matrix.target }}/release/bundle/dmg/dsh-tauri-gui_${{ needs.check-version.outputs.version }}_macOS_${{ matrix.bundle_arch }}.dmg"
+        run: pnpm exec tauri signer sign "src-tauri/target/${{ matrix.target }}/release/bundle/dmg/dsh-tauri-gui_${{ needs.resolve-release.outputs.version }}_macOS_${{ matrix.bundle_arch }}.dmg"
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
-      - name: Verify required bundle artifacts
+      - name: Verify bundle manifest (files, signatures, version, digests)
         shell: bash
         run: |
           set -euo pipefail
-          VERSION="${{ needs.check-version.outputs.version }}"
-          ROOT="src-tauri/target/${{ matrix.target }}/release/bundle"
-          case "${{ matrix.bundle_platform }}" in
-            windows)
-              FILES=(
-                "$ROOT/nsis/dsh-tauri-gui_${VERSION}_Windows_x64-setup.exe"
-                "$ROOT/nsis/dsh-tauri-gui_${VERSION}_Windows_x64-setup.exe.sig"
-                "$ROOT/msi/dsh-tauri-gui_${VERSION}_Windows_x64.msi"
-                "$ROOT/msi/dsh-tauri-gui_${VERSION}_Windows_x64.msi.sig"
-              )
-              ;;
-            macos)
-              ARCH="${{ matrix.bundle_arch }}"
-              FILES=(
-                "$ROOT/dmg/dsh-tauri-gui_${VERSION}_macOS_${ARCH}.dmg"
-                "$ROOT/dmg/dsh-tauri-gui_${VERSION}_macOS_${ARCH}.dmg.sig"
-                "$ROOT/macos/dsh-tauri-gui_${VERSION}_macOS_${ARCH}.app.tar.gz"
-                "$ROOT/macos/dsh-tauri-gui_${VERSION}_macOS_${ARCH}.app.tar.gz.sig"
-              )
-              ;;
-            linux)
-              FILES=(
-                "$ROOT/appimage/dsh-tauri-gui-${VERSION}-Linux-x86_64.AppImage"
-                "$ROOT/appimage/dsh-tauri-gui-${VERSION}-Linux-x86_64.AppImage.sig"
-                "$ROOT/deb/dsh-tauri-gui_${VERSION}_Linux_amd64.deb"
-                "$ROOT/deb/dsh-tauri-gui_${VERSION}_Linux_amd64.deb.sig"
-              )
-              ;;
-            *)
-              echo "::error::unknown bundle platform" >&2
-              exit 1
-              ;;
-          esac
-          for file in "${FILES[@]}"; do
-            if [ ! -f "$file" ]; then
-              echo "::error::missing required artifact: $file"
-              exit 1
-            fi
-          done
-          echo "::notice::all required artifacts present for ${{ matrix.bundle_platform }}"
+          BUNDLE="src-tauri/target/${{ matrix.target }}/release/bundle"
+          MANIFEST="$BUNDLE/bundle-manifest.json"
+          [ -f "$MANIFEST" ] || { echo "::error::missing $MANIFEST"; exit 1; }
+          node -e "
+            const fs = require('fs');
+            const path = require('path');
+            const m = JSON.parse(fs.readFileSync(process.argv[1], 'utf8'));
+            const expected = process.argv[2];
+            if (m.version !== expected) {
+              throw new Error('manifest version ' + m.version + ' != expected ' + expected);
+            }
+            if (m.files.length === 0) throw new Error('empty manifest');
+            for (const f of m.files) {
+              const p = path.join(path.dirname(process.argv[1]), f.artifact);
+              if (!fs.existsSync(p)) throw new Error('missing artifact ' + f.artifact);
+              if (!fs.existsSync(path.join(path.dirname(process.argv[1]), f.signature))) {
+                throw new Error('missing signature ' + f.signature);
+              }
+              if (!/^[0-9a-f]{64}$/.test(f.sha256)) throw new Error('bad sha256 for ' + f.artifact);
+            }
+            console.log('manifest OK: ' + m.files.length + ' artifact(s) for v' + m.version);
+          " "$MANIFEST" "${{ needs.resolve-release.outputs.version }}"
 
       - name: Upload bundles
         uses: actions/upload-artifact@v4
@@ -192,16 +327,19 @@ jobs:
           if-no-files-found: error
           path: src-tauri/target/${{ matrix.target }}/release/bundle
 
-  release:
+  # ---------------------------------------------------------------------
+  # 4. publish-release: only after ALL platforms built. Upload assets to the
+  #    draft, generate latest.json, verify, then publish (unless dispatch
+  #    requested draft mode). Never touches GitHub Latest here.
+  # ---------------------------------------------------------------------
+  publish-release:
     name: Publish GitHub release
-    needs: [check-version, build]
+    needs: [resolve-release, prepare-release, build]
     runs-on: ubuntu-latest
-    env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      GITHUB_OWNER: KevinT-hub
-      GITHUB_REPO: dsh-tauri-gui
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve-release.outputs.source_sha }}
 
       - uses: actions/setup-node@v4
         with:
@@ -211,100 +349,97 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-          merge-multiple: true
 
-      - name: Show artifacts
-        run: find artifacts -type f -printf '%P\n' | sort
-
-      - name: Ensure updater release exists
-        if: needs.check-version.outputs.prerelease == 'false'
+      - name: Verify asset manifest across platforms
         run: |
-          gh release create update \
-            --title "updater" \
-            --notes "Release for maintaining latest.json." \
-            --target "$GITHUB_SHA" \
-            --prerelease \
-            --latest=false 2>/dev/null || \
-          gh release edit update --prerelease --latest=false 2>/dev/null || true
+          set -euo pipefail
+          node -e "
+            const fs = require('fs');
+            const path = require('path');
+            const { execSync } = require('child_process');
+            const expected = process.argv[2];
+            const manifests = execSync('find artifacts -name bundle-manifest.json | sort', { encoding: 'utf8' })
+              .trim().split('\n').filter(Boolean);
+            if (manifests.length === 0) throw new Error('no bundle-manifest.json found under artifacts/');
+            const platforms = new Set();
+            const basenames = new Set();
+            let total = 0;
+            for (const mPath of manifests) {
+              const m = JSON.parse(fs.readFileSync(mPath, 'utf8'));
+              if (m.version !== expected) throw new Error(mPath + ': version ' + m.version + ' != ' + expected);
+              platforms.add(m.platform);
+              for (const f of m.files) {
+                const p = path.join(path.dirname(mPath), f.artifact);
+                if (!fs.existsSync(p)) throw new Error('missing ' + f.artifact);
+                const base = path.basename(f.artifact);
+                if (basenames.has(base)) throw new Error('duplicate asset basename: ' + base);
+                basenames.add(base);
+                total += 1;
+              }
+            }
+            const required = ['windows', 'macos', 'linux'];
+            for (const platform of required) {
+              if (!platforms.has(platform)) throw new Error('missing platform artifacts: ' + platform);
+            }
+            console.log('asset manifest OK: ' + total + ' unique file(s) for platforms ' + [...platforms].join(', '));
+          " "${{ needs.resolve-release.outputs.version }}"
 
-      - name: Create GitHub release
+      - name: Upload installers to draft release
         run: |
-          TAG="${{ needs.check-version.outputs.tag }}"
-          PRERELEASE="${{ needs.check-version.outputs.prerelease }}"
-          NOTES_FILE=""
-          if [ -f "RELEASE_NOTES_${TAG}.md" ]; then
-            NOTES_FILE="RELEASE_NOTES_${TAG}.md"
-          elif [ -f "RELEASE_NOTES.md" ] && grep -q "${TAG}" RELEASE_NOTES.md; then
-            NOTES_FILE="RELEASE_NOTES.md"
-          fi
-
-          if [ -n "$NOTES_FILE" ]; then
-            gh release create "$TAG" \
-              --title "DeepSeek Harness Tauri Desktop ${TAG}" \
-              --notes-file "$NOTES_FILE" \
-              --target "$GITHUB_SHA" $([ "$PRERELEASE" = "true" ] && echo --prerelease) \
-              2>/dev/null || gh release edit "$TAG" --latest 2>/dev/null || true
-          else
-            gh release create "$TAG" \
-              --title "DeepSeek Harness Tauri Desktop ${TAG}" \
-              --notes "Release ${TAG}" \
-              --target "$GITHUB_SHA" $([ "$PRERELEASE" = "true" ] && echo --prerelease) \
-              2>/dev/null || gh release edit "$TAG" --latest 2>/dev/null || true
-          fi
-
-      - name: Upload installers to GitHub release
-        run: |
-          mapfile -t ALL_FILES < <(find artifacts -type f | sort)
-          RELEASE_FILES=()
-          for f in "${ALL_FILES[@]}"; do
-            case "$f" in
-              *.exe|*.msi|*.dmg|*.deb|*.rpm|*.AppImage|*.app.tar.gz|*.sig)
-                RELEASE_FILES+=("$f")
-                ;;
-            esac
-          done
-
-          declare -A SEEN
-          UNIQUE_FILES=()
-          for f in "${RELEASE_FILES[@]}"; do
-            name=$(basename "$f")
-            if [[ -z "${SEEN[$name]+x}" ]]; then
-              SEEN[$name]=1
-              UNIQUE_FILES+=("$f")
-            fi
-          done
-
-          if [ ${#UNIQUE_FILES[@]} -eq 0 ]; then
-            echo "::error::No release files found under artifacts/"
+          set -euo pipefail
+          TAG="${{ needs.resolve-release.outputs.tag }}"
+          RELEASE_ID="${{ needs.prepare-release.outputs.release_id }}"
+          mapfile -t FILES < <(find artifacts -type f \( \
+            -name '*.exe' -o -name '*.msi' -o -name '*.dmg' -o -name '*.deb' \
+            -o -name '*.rpm' -o -name '*.AppImage' -o -name '*.app.tar.gz' \
+            -o -name '*.sig' \) | sort)
+          if [ ${#FILES[@]} -eq 0 ]; then
+            echo "::error::no installers found under artifacts/"
             exit 1
           fi
-          gh release upload "${{ needs.check-version.outputs.tag }}" "${UNIQUE_FILES[@]}" --clobber
+          node scripts/reconcile-release-state.mjs upload-assets \
+            --tag "$TAG" --release-id "$RELEASE_ID" "${FILES[@]}"
 
       - name: Generate latest.json
         run: |
-          VERSION="${{ needs.check-version.outputs.version }}"
-          TAG="${{ needs.check-version.outputs.tag }}"
+          set -euo pipefail
+          VERSION="${{ needs.resolve-release.outputs.version }}"
+          TAG="${{ needs.resolve-release.outputs.tag }}"
           NOTES=$(gh release view "$TAG" --json body --jq .body)
+          if [ "${{ needs.resolve-release.outputs.is_prerelease }}" = "true" ]; then
+            CHANNEL=prerelease
+          else
+            CHANNEL=stable
+          fi
           node scripts/update-latest.mjs \
             --from-dir artifacts \
             --version "$VERSION" \
             --tag "$TAG" \
-            --notes "$NOTES"
+            --notes "$NOTES" \
+            --channel "$CHANNEL"
 
       - name: Validate latest.json update channels
         run: |
+          set -euo pipefail
           node -e "
             const fs = require('fs');
             const data = JSON.parse(fs.readFileSync('latest.json', 'utf8'));
+            const tag = process.argv[2];
             const required = {
               'windows-x86_64': '-setup.exe',
               'darwin-x86_64': '.app.tar.gz',
               'darwin-aarch64': '.app.tar.gz',
               'linux-x86_64': '.AppImage'
             };
+            if (data.version !== tag.slice(1)) {
+              throw new Error('latest.json version ' + data.version + ' != ' + tag);
+            }
             for (const [key, suffix] of Object.entries(required)) {
               const entry = data.platforms[key];
               if (!entry) throw new Error('missing platform ' + key);
+              if (!entry.url.includes('/' + tag + '/')) {
+                throw new Error(key + ' url must reference ' + tag + ': ' + entry.url);
+              }
               if (!entry.url.endsWith(suffix)) {
                 throw new Error(key + ' url must end with ' + suffix + ': ' + entry.url);
               }
@@ -312,19 +447,85 @@ jobs:
                 throw new Error(key + ' missing signature/sha256');
               }
             }
-            console.log('latest.json update channels OK:', Object.keys(data.platforms).join(', '));
-          "
+            console.log('latest.json update channels OK: ' + Object.keys(data.platforms).join(', '));
+          " "${{ needs.resolve-release.outputs.tag }}"
 
-      - name: Upload latest.json to versioned GitHub release
+      - name: Upload latest.json to versioned release
         run: |
-          TAG="${{ needs.check-version.outputs.tag }}"
-          gh release upload "$TAG" latest.json --clobber
-          if [ "${{ needs.check-version.outputs.prerelease }}" != "true" ]; then
-            gh release edit "$TAG" --latest
+          set -euo pipefail
+          TAG="${{ needs.resolve-release.outputs.tag }}"
+          if [ "${{ needs.resolve-release.outputs.is_prerelease }}" = "true" ]; then
+            # Prereleases must not pollute the stable updater channel; upload a
+            # clearly named artifact instead of `latest.json`.
+            cp latest.json latest-prerelease.json
+            gh release upload "$TAG" latest-prerelease.json --clobber
+          else
+            gh release upload "$TAG" latest.json --clobber
           fi
 
-      - name: Upload latest.json to updater release
-        if: needs.check-version.outputs.prerelease == 'false'
+      - name: Publish release
+        if: github.event_name == 'push' || inputs.publish_mode != 'draft'
         run: |
-          gh release upload update latest.json --clobber
-          gh release edit update --prerelease --latest=false
+          set -euo pipefail
+          node scripts/reconcile-release-state.mjs publish \
+            --tag "${{ needs.resolve-release.outputs.tag }}" \
+            --release-id "${{ needs.prepare-release.outputs.release_id }}" \
+            --prerelease "${{ needs.resolve-release.outputs.is_prerelease }}"
+
+  # ---------------------------------------------------------------------
+  # 5. reconcile-latest: the ONLY job allowed to change GitHub Latest.
+  #    Serialized globally so two concurrent stable releases cannot race.
+  #    A rerun of an older stable release keeps Latest on the newer one.
+  # ---------------------------------------------------------------------
+  reconcile-latest:
+    name: Reconcile GitHub Latest
+    if: needs.resolve-release.outputs.is_prerelease == 'false'
+    needs: [resolve-release, publish-release]
+    runs-on: ubuntu-latest
+    concurrency:
+      group: release-latest-reconcile
+      cancel-in-progress: false
+    steps:
+      - name: Set Latest to highest stable release
+        run: |
+          node scripts/reconcile-release-state.mjs set-latest \
+            --tag "${{ needs.resolve-release.outputs.tag }}"
+
+  # ---------------------------------------------------------------------
+  # 6. publish-updater-channel: the ONLY job that writes the stable `update`
+  #    release. Serialized globally (`updater-stable-channel`), recomputes the
+  #    highest stable version, and verifies the written latest.json.
+  # ---------------------------------------------------------------------
+  publish-updater-channel:
+    name: Publish stable updater channel
+    if: needs.resolve-release.outputs.is_prerelease == 'false'
+    needs: [resolve-release, publish-release]
+    runs-on: ubuntu-latest
+    concurrency:
+      group: updater-stable-channel
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve-release.outputs.source_sha }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Generate latest.json from highest stable release
+        run: node scripts/update-latest.mjs --from-release --channel stable
+
+      - name: Read selected stable version
+        id: stable
+        run: |
+          V=$(node -e "console.log(JSON.parse(require('fs').readFileSync('latest.json', 'utf8')).version)")
+          echo "tag=v${V}" >> "$GITHUB_OUTPUT"
+          echo "::notice::stable updater channel will point at v${V}"
+
+      - name: Sync update release
+        run: |
+          node scripts/reconcile-release-state.mjs sync-updater \
+            --tag "${{ steps.stable.outputs.tag }}" \
+            --latest-json latest.json \
+            --target "$GITHUB_SHA"

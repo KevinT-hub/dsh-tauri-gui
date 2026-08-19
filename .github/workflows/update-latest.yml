@@ -1,19 +1,37 @@
-name: Update latest.json
+name: Reconcile Stable Updater Channel
 
 on:
   workflow_dispatch:
+    inputs:
+      stable_tag:
+        description: 'Optional explicit stable tag (vX.Y.Z, e.g. v1.2.3). Default: the highest stable release wins.'
+        required: false
+      mode:
+        description: 'reconcile selects the highest stable release by SemVer; from-tag requires stable_tag and validates it.'
+        required: false
+        default: 'reconcile'
+        type: choice
+        options:
+          - reconcile
+          - from-tag
 
 permissions:
   contents: write
 
+# Same global group as release.yml's publish-updater-channel job: only one
+# writer may touch the stable `update` release at a time.
+concurrency:
+  group: updater-stable-channel
+  cancel-in-progress: false
+
 jobs:
-  update:
-    name: Regenerate latest.json from the latest release
+  reconcile:
+    name: Reconcile stable updater channel
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      GITHUB_OWNER: KevinT-hub
-      GITHUB_REPO: dsh-tauri-gui
+      GITHUB_OWNER: ${{ github.repository_owner }}
+      GITHUB_REPO: ${{ github.event.repository.name }}
     steps:
       - uses: actions/checkout@v4
 
@@ -21,17 +39,31 @@ jobs:
         with:
           node-version: 22
 
-      - name: Generate latest.json from latest GitHub release
-        run: node scripts/update-latest.mjs --from-release
-
-      - name: Upload to GitHub update channel
+      # --from-release never trusts /releases/latest: without --tag it picks
+      # the highest stable (non-draft, non-prerelease) release by SemVer;
+      # with --tag it validates draft/prerelease/published_at/assets first.
+      - name: Generate latest.json from stable release
         run: |
-          gh release create update \
-            --title "updater" \
-            --notes "Release for maintaining latest.json." \
-            --target "$GITHUB_SHA" \
-            --prerelease \
-            --latest=false 2>/dev/null || \
-          gh release edit update --prerelease --latest=false 2>/dev/null || true
-          gh release upload update latest.json --clobber
-          gh release edit update --prerelease --latest=false
+          if [ "${{ inputs.mode }}" = "from-tag" ]; then
+            node scripts/update-latest.mjs --from-release --channel stable \
+              --tag "${{ inputs.stable_tag }}"
+          else
+            node scripts/update-latest.mjs --from-release --channel stable
+          fi
+
+      - name: Read selected stable version
+        id: stable
+        run: |
+          V=$(node -e "console.log(JSON.parse(require('fs').readFileSync('latest.json', 'utf8')).version)")
+          echo "tag=v${V}" >> "$GITHUB_OUTPUT"
+          echo "::notice::stable updater channel will point at v${V}"
+
+      # sync-updater creates/reads the fixed `update` release (prerelease=true,
+      # make_latest=false), uploads latest.json, re-downloads it for a
+      # byte-for-byte check, and asserts isPrerelease=true / isLatest=false.
+      - name: Sync update release
+        run: |
+          node scripts/reconcile-release-state.mjs sync-updater \
+            --tag "${{ steps.stable.outputs.tag }}" \
+            --latest-json latest.json \
+            --target "$GITHUB_SHA"
