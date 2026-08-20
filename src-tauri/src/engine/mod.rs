@@ -26,6 +26,8 @@ pub(crate) fn hide_console(command: &mut Command) {
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         command.creation_flags(CREATE_NO_WINDOW);
     }
+    #[cfg(not(windows))]
+    let _ = command;
 }
 
 pub fn spawn_engine(app: &AppHandle, state: &Arc<AppState>) -> Result<(), String> {
