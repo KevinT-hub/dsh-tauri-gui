@@ -30,6 +30,11 @@ env:
   CARGO_INCREMENTAL: 0
   RUST_BACKTRACE: short
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  # GitHub-hosted runners run outside mainland China. Use upstream sources for
+  # both the npm packages and the Node archive; local defaults stay mirror-first.
+  NPM_CONFIG_REGISTRY: https://registry.npmjs.org
+  DSH_TAURI_NPM_REGISTRY: https://registry.npmjs.org
+  DSH_TAURI_NODE_MIRROR: https://nodejs.org/dist
 
 concurrency:
   group: release-${{ github.ref }}
@@ -260,12 +265,10 @@ jobs:
             libssl-dev
 
       - name: Install frontend dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --registry=https://registry.npmjs.org
 
       - name: Prepare self-contained dsh runtime
         run: pnpm run runtime:package
-        env:
-          DSH_TAURI_NPM_REGISTRY: https://registry.npmmirror.com
 
       # Guards against compile-only placeholders (from --test-resource) ever
       # reaching a release build.

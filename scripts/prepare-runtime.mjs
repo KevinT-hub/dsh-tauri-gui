@@ -59,6 +59,12 @@ const FALLBACK_REGISTRY = "https://registry.npmjs.org";
 const NODE_MIRROR =
   process.env.DSH_TAURI_NODE_MIRROR ?? "https://npmmirror.com/mirrors/node";
 const OFFICIAL_NODE_BASE = "https://nodejs.org/dist";
+const NPM_FETCH_RETRY_ARGS = [
+  "--fetch-retries=5",
+  "--fetch-retry-factor=2",
+  "--fetch-retry-mintimeout=1000",
+  "--fetch-retry-maxtimeout=30000",
+];
 const PLATFORM_KEY = `${process.platform}-${process.arch}`;
 const PRUNE_DIRS = new Set([
   "examples",
@@ -254,8 +260,10 @@ function extractArchive(archivePath, extractDir) {
 function nodeArchiveUrls(info) {
   const name = `${info.base}.${info.file}`;
   return [
-    `${NODE_MIRROR}/v${NODE_VERSION}/${name}`,
-    `${OFFICIAL_NODE_BASE}/v${NODE_VERSION}/${name}`,
+    ...new Set([
+      `${NODE_MIRROR}/v${NODE_VERSION}/${name}`,
+      `${OFFICIAL_NODE_BASE}/v${NODE_VERSION}/${name}`,
+    ]),
   ];
 }
 
@@ -278,8 +286,10 @@ async function fetchChecksumUrl(url) {
 async function expectedNodeChecksum(info) {
   const fileName = `${info.base}.${info.file}`;
   const urls = [
-    `${OFFICIAL_NODE_BASE}/v${NODE_VERSION}/SHASUMS256.txt`,
-    `${NODE_MIRROR}/v${NODE_VERSION}/SHASUMS256.txt`,
+    ...new Set([
+      `${OFFICIAL_NODE_BASE}/v${NODE_VERSION}/SHASUMS256.txt`,
+      `${NODE_MIRROR}/v${NODE_VERSION}/SHASUMS256.txt`,
+    ]),
   ];
   for (const url of urls) {
     try {
@@ -326,6 +336,13 @@ async function download(urls, dest, label) {
       "-#",
       "-L",
       "--fail",
+      "--retry",
+      "5",
+      "--retry-delay",
+      "2",
+      "--retry-max-time",
+      "120",
+      "--retry-connrefused",
       "--connect-timeout",
       "20",
       "-o",
@@ -417,6 +434,7 @@ function installDsh(nodeRoot, target, refresh) {
     "--prefix",
     appDir,
     `@deepseek-ai/dsh@${DSH_VERSION}`,
+    ...NPM_FETCH_RETRY_ARGS,
     "--registry",
     REGISTRY,
     "--no-audit",
@@ -443,6 +461,7 @@ function installPnpm(nodeRoot, target, refresh) {
     "--prefix",
     toolsDir,
     `pnpm@${PNPM_VERSION}`,
+    ...NPM_FETCH_RETRY_ARGS,
     "--registry",
     REGISTRY,
     "--no-audit",

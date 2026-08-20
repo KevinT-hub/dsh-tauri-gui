@@ -14,6 +14,13 @@ on:
 permissions:
   contents: read
 
+# GitHub-hosted runners run outside mainland China. Keep CI on the official
+# upstream endpoints; the local-development defaults remain in prepare-runtime.
+env:
+  NPM_CONFIG_REGISTRY: https://registry.npmjs.org
+  DSH_TAURI_NPM_REGISTRY: https://registry.npmjs.org
+  DSH_TAURI_NODE_MIRROR: https://nodejs.org/dist
+
 # Keep only the newest run per branch/PR; release workflows are separate and
 # unaffected by this group.
 concurrency:
@@ -33,7 +40,7 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile --registry=https://registry.npmjs.org
       # `build` runs `tsc` (type check) then `vite build`.
       - run: pnpm run build
       # Release tooling (semver/version/reconcile/rename/updater) unit tests.
@@ -72,7 +79,7 @@ jobs:
 
       - name: Install frontend dependencies
         run: |
-          pnpm install --frozen-lockfile
+          pnpm install --frozen-lockfile --registry=https://registry.npmjs.org
           pnpm run build
 
       # Explicit compile-only placeholders (marked testMode) so `cargo check`
@@ -110,7 +117,7 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile --registry=https://registry.npmjs.org
 
       # Building @deepseek-ai/dsh pulls hundreds of npm packages and is the
       # dominant cost of this job. Cache the finished, platform-specific
@@ -140,8 +147,6 @@ jobs:
       - name: Prepare pruned runtime bundle
         if: steps.runtime-bundle-cache.outputs.cache-hit != 'true'
         run: node scripts/prepare-runtime.mjs --package --target "$RUNNER_TEMP/dsh-runtime" --keep
-        env:
-          DSH_TAURI_NPM_REGISTRY: https://registry.npmjs.org
 
       - name: Unpack cached runtime bundle
         if: steps.runtime-bundle-cache.outputs.cache-hit == 'true'
