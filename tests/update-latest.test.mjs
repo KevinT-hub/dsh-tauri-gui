@@ -1,6 +1,6 @@
 /**
  * Unit tests for scripts/update-latest.mjs platform mapping, stable selection
- * and latest.json generation. Run: node --test scripts/update-latest.test.mjs
+ * and latest.json generation. Run: node --test tests/update-latest.test.mjs
  */
 
 import { test } from "node:test";
@@ -16,7 +16,7 @@ import {
   PLATFORM_RULES,
   selectStableTagFromReleases,
   writeOutputs,
-} from "./update-latest.mjs";
+} from "../scripts/update-latest.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const FIXTURES = join(ROOT, "tests", "fixtures", "releases");

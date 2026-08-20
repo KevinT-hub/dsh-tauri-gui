@@ -45,7 +45,7 @@ pnpm tauri dev
 | `pnpm runtime:prepare` | 准备本地运行时（`--dev` / `--package` / `--prune`） |
 | `pnpm runtime:package` | 打包运行时为 `src-tauri/resources/runtime.tar.gz` + `runtime.json` |
 | `pnpm runtime:smoke` | 冒烟测试：校验解压后的运行时可用 |
-| `pnpm test:scripts` | 运行 `scripts/*.test.mjs` |
+| `pnpm test:scripts` | 运行 `tests/*.test.mjs` |
 | `pnpm version:check` / `pnpm version:set` | 版本一致性检查 / 设置 |
 
 ## 运行时打包
@@ -87,7 +87,7 @@ CI 安全加固的细节（最小权限、产物校验、密钥边界等）见 [
 
 ## 测试
 
-- 前端 / 脚本：`pnpm test:scripts`（Node 内置测试，覆盖 `scripts/*.test.mjs`）
+- 前端 / 脚本：`pnpm test:scripts`（Node 内置测试，覆盖 `tests/*.test.mjs`）
 - Rust 单元：`cargo test`（版本解析、Node 版本支持窗口、更新比较等）
 - 运行时冒烟：`pnpm runtime:smoke`
 

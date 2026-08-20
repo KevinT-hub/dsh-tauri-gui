@@ -1,6 +1,6 @@
 /**
  * Unit tests for scripts/lib/semver.mjs and scripts/release-version.mjs.
- * Run: node --test scripts/release-version.test.mjs
+ * Run: node --test tests/release-version.test.mjs
  */
 
 import { test } from "node:test";
@@ -10,8 +10,8 @@ import {
   maxVersion,
   parseVersion,
   sortVersions,
-} from "./lib/semver.mjs";
-import { readProjectVersions } from "./release-version.mjs";
+} from "../scripts/lib/semver.mjs";
+import { readProjectVersions } from "../scripts/release-version.mjs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 

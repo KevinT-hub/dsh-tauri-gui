@@ -31,7 +31,8 @@
  *   sync-updater --tag <t> --latest-json <file> [--target <sha>]
  *       Create/read the fixed `update` release (prerelease=true,
  *       make_latest=false), upload <file> as latest.json, re-download and
- *       verify content, then assert isPrerelease=true and isLatest=false.
+ *       verify content, then assert isPrerelease=true and that `update` is not
+ *       the repository's `/releases/latest` release.
  *
  *   assert-state --tag <t> [--draft true|false] [--prerelease true|false]
  *       Assert release properties; exit non-zero on mismatch.
@@ -40,7 +41,9 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
 import { maxVersion, parseVersion } from "./lib/semver.mjs";
 
@@ -83,18 +86,50 @@ function api(route, jq) {
   return gh(args);
 }
 
+function latestReleaseTag() {
+  try {
+    return api("releases/latest", ".tag_name");
+  } catch (error) {
+    if (isNotFound(error)) return null;
+    throw error;
+  }
+}
+
+function patchRelease(releaseId, fields) {
+  const args = [
+    "api",
+    "--method",
+    "PATCH",
+    `repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/${releaseId}`,
+  ];
+  for (const [key, value] of Object.entries(fields)) {
+    if (typeof value === "boolean") {
+      args.push("-F", `${key}=${value}`);
+    } else {
+      args.push("-f", `${key}=${value}`);
+    }
+  }
+  args.push("--silent");
+  gh(args);
+}
+
 function releaseView(tag) {
   // Returns the release object, or null when the release does not exist.
   // Any other failure propagates so the caller can distinguish real errors.
   try {
-    const json = gh([
-      "release",
-      "view",
-      tag,
-      "--json",
-      "id,tagName,name,isDraft,isPrerelease,isLatest,publishedAt,targetCommitish,url,assets",
-    ]);
-    return JSON.parse(json);
+    const raw = JSON.parse(
+      gh(["api", `repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/tags/${tag}`]),
+    );
+    return {
+      databaseId: raw.id,
+      tagName: raw.tag_name,
+      name: raw.name,
+      isDraft: raw.draft,
+      isPrerelease: raw.prerelease,
+      publishedAt: raw.published_at,
+      url: raw.html_url,
+      assets: raw.assets || [],
+    };
   } catch (error) {
     if (isNotFound(error)) return null;
     throw error;
@@ -152,15 +187,21 @@ function cmdEnsureDraft(args) {
 
   const existing = releaseView(parsed.tag);
   if (existing) {
-    // Idempotent rerun: reuse the existing release (draft or published).
-    // Never treat unexpected states as "already exists" — the target commit
-    // must match, and everything else is the caller's job to verify.
-    if (target && existing.targetCommitish && existing.targetCommitish !== target) {
+    // Idempotent rerun: reuse the existing release (draft or published). The
+    // Git tag has already been resolved and validated by the workflow. Do not
+    // compare targetCommitish here: GitHub stores a branch name such as "main"
+    // in that field even when the tag resolves to a commit SHA.
+    if (existing.tagName !== parsed.tag) {
       throw new Error(
-        `release ${parsed.tag} targets ${existing.targetCommitish} but expected ${target}`,
+        `release lookup returned tag ${existing.tagName}, expected ${parsed.tag}`,
       );
     }
-    emit(output, { release_id: existing.id, release_exists: "true", tag: parsed.tag });
+    if (existing.isPrerelease !== prerelease) {
+      throw new Error(
+        `release ${parsed.tag} has prerelease=${existing.isPrerelease}, expected ${prerelease}`,
+      );
+    }
+    emit(output, { release_id: existing.databaseId, release_exists: "true", tag: parsed.tag });
     return;
   }
 
@@ -173,6 +214,7 @@ function cmdEnsureDraft(args) {
     title,
     "--latest=false",
     `--prerelease=${prerelease}`,
+    "--verify-tag",
   ];
   if (notesFile) createArgs.push("--notes-file", notesFile);
   else if (notes) createArgs.push("--notes", notes);
@@ -184,7 +226,7 @@ function cmdEnsureDraft(args) {
   if (!created || created.isDraft !== true) {
     throw new Error(`failed to create draft release ${parsed.tag}`);
   }
-  emit(output, { release_id: created.id, release_exists: "false", tag: parsed.tag });
+  emit(output, { release_id: created.databaseId, release_exists: "false", tag: parsed.tag });
 }
 
 function cmdUploadAssets(args) {
@@ -212,9 +254,9 @@ function cmdPublish(args) {
   if (!existing) {
     throw new Error(`release ${parsed.tag} does not exist; nothing to publish`);
   }
-  if (existing.id !== Number(releaseId)) {
+  if (existing.databaseId !== Number(releaseId)) {
     throw new Error(
-      `release id mismatch for ${parsed.tag}: expected ${releaseId}, got ${existing.id}`,
+      `release id mismatch for ${parsed.tag}: expected ${releaseId}, got ${existing.databaseId}`,
     );
   }
   if (existing.isDraft !== true) {
@@ -229,20 +271,34 @@ function cmdPublish(args) {
     return;
   }
 
-  gh(["release", "edit", parsed.tag, "--draft=false", `--prerelease=${prerelease}`, "--latest=false"]);
+  patchRelease(existing.databaseId, {
+    draft: false,
+    prerelease,
+    make_latest: "false",
+  });
   const after = releaseView(parsed.tag);
   if (!after || after.isDraft !== false) {
     throw new Error(`publish of ${parsed.tag} did not take effect`);
   }
   process.stdout.write(
-    `[publish] ${parsed.tag} published (prerelease=${after.isPrerelease}, latest=${after.isLatest})\n`,
+    `[publish] ${parsed.tag} published (prerelease=${after.isPrerelease})\n`,
   );
 }
 
 function collectStableReleases() {
-  const releases = JSON.parse(
-    api("releases", "[.[] | {tag_name, draft, prerelease}]"),
+  const pages = JSON.parse(
+    gh([
+      "api",
+      `repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases`,
+      "--paginate",
+      "--slurp",
+    ]),
   );
+  const releases = (Array.isArray(pages) ? pages.flat() : pages).map((release) => ({
+    tag_name: release.tag_name,
+    draft: release.draft,
+    prerelease: release.prerelease,
+  }));
   const stable = [];
   for (const release of releases) {
     if (release.draft || release.prerelease) continue;
@@ -280,7 +336,9 @@ function cmdSetLatest(args) {
     );
   }
   for (const candidate of stable) {
-    gh(["release", "edit", candidate, `--latest=${candidate === selected}`]);
+    const release = releaseView(candidate);
+    if (!release) throw new Error(`stable release ${candidate} disappeared during Latest reconciliation`);
+    patchRelease(release.databaseId, { make_latest: candidate === selected ? "true" : "false" });
   }
   const latestTag = api("releases/latest", ".tag_name");
   if (latestTag !== selected) {
@@ -319,16 +377,21 @@ function cmdSyncUpdater(args) {
     if (target) createArgs.push("--target", target);
     gh(createArgs);
   } else {
-    gh(["release", "edit", UPDATE_RELEASE, "--prerelease=true", "--latest=false"]);
+    patchRelease(existing.databaseId, {
+      draft: false,
+      prerelease: true,
+      make_latest: "false",
+    });
   }
 
   gh(["release", "upload", UPDATE_RELEASE, latestJson, "--clobber"]);
 
   const after = releaseView(UPDATE_RELEASE);
   if (!after) throw new Error(`update release vanished after sync`);
-  if (after.isPrerelease !== true || after.isLatest !== false) {
+  const latestTag = latestReleaseTag();
+  if (after.isPrerelease !== true || latestTag === UPDATE_RELEASE) {
     throw new Error(
-      `update release state wrong: isPrerelease=${after.isPrerelease}, isLatest=${after.isLatest}`,
+      `update release state wrong: isPrerelease=${after.isPrerelease}, repository latest=${latestTag ?? "<none>"}`,
     );
   }
   const asset = after.assets.find((entry) => entry.name === "latest.json");
@@ -336,17 +399,35 @@ function cmdSyncUpdater(args) {
     throw new Error("update release has no latest.json asset");
   }
 
-  // Re-download and compare byte-for-byte so the stable channel is verified,
-  // not just written.
-  const redownload = gh(["api", asset.url, "--jq", ".content"], { quiet: true });
-  let actual = "";
+  // Re-download through the GitHub CLI's release endpoint and compare
+  // byte-for-byte. `gh release view --json assets` exposes a browser download
+  // URL as `url` on current CLI versions, not necessarily the REST asset API
+  // URL; passing that URL to `gh api` can return a redirect or binary body
+  // instead of the expected `{content: ...}` JSON. `gh release download` is
+  // the stable, version-independent way to read the uploaded asset.
+  const tempDir = mkdtempSync(join(tmpdir(), "dsh-updater-verify-"));
+  const downloaded = join(tempDir, "latest.json");
   try {
-    actual = Buffer.from(redownload, "base64").toString("utf8");
-  } catch {
-    actual = redownload;
-  }
-  if (actual.trim() !== content.trim()) {
-    throw new Error("update/latest.json content differs from the uploaded file");
+    gh([
+      "release",
+      "download",
+      UPDATE_RELEASE,
+      "--pattern",
+      "latest.json",
+      "--output",
+      downloaded,
+      "--clobber",
+    ]);
+    const actual = readFileSync(downloaded, "utf8");
+    if (actual.trim() !== content.trim()) {
+      throw new Error("update/latest.json content differs from the uploaded file");
+    }
+  } catch (error) {
+    throw new Error(
+      `failed to download and verify update/latest.json: ${error.message}`,
+    );
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
   }
   process.stdout.write(`[sync-updater] ${UPDATE_RELEASE}/latest.json -> ${parsed.tag} OK\n`);
 }
@@ -363,7 +444,8 @@ function cmdAssertState(args) {
   if (prerelease !== undefined && release.isPrerelease !== prerelease) {
     throw new Error(`assert-state: ${tag} isPrerelease=${release.isPrerelease}, expected ${prerelease}`);
   }
-  process.stdout.write(`[assert-state] ${tag}: draft=${release.isDraft}, prerelease=${release.isPrerelease}, latest=${release.isLatest}, assets=${release.assets.length}\n`);
+  const latestTag = latestReleaseTag();
+  process.stdout.write(`[assert-state] ${tag}: draft=${release.isDraft}, prerelease=${release.isPrerelease}, latest=${latestTag === tag}, assets=${release.assets.length}\n`);
 }
 
 function main() {

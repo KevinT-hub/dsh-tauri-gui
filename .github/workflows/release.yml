@@ -49,8 +49,11 @@ jobs:
       channel: ${{ steps.resolve.outputs.channel }}
       is_prerelease: ${{ steps.resolve.outputs.is_prerelease }}
       base_version: ${{ steps.resolve.outputs.base_version }}
-      source_sha: ${{ steps.resolve.outputs.source_sha }}
-      release_exists: ${{ steps.check-existing.outputs.release_exists }}
+      # source_sha is emitted by Validate tag commit and source branch, not by
+      # the version parser. Keeping this mapping explicit ensures every later
+      # job checks out the exact commit behind the pushed tag.
+      source_sha: ${{ steps.validate_tag.outputs.source_sha }}
+      release_exists: ${{ steps.check_existing.outputs.release_exists }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -82,14 +85,19 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         run: |
           set -euo pipefail
-          if [ "${{ inputs.publish_mode }}" = "stable" ] && \
-             [ "${{ steps.resolve.outputs.is_prerelease }}" = "true" ]; then
+          MODE="${{ inputs.publish_mode }}"
+          IS_PRERELEASE="${{ steps.resolve.outputs.is_prerelease }}"
+          if [ "$MODE" = "stable" ] && [ "$IS_PRERELEASE" = "true" ]; then
             echo "::error::publish_mode=stable requires a stable tag (no prerelease)"
+            exit 1
+          fi
+          if [ "$MODE" = "prerelease" ] && [ "$IS_PRERELEASE" != "true" ]; then
+            echo "::error::publish_mode=prerelease requires a prerelease tag"
             exit 1
           fi
 
       - name: Validate tag commit and source branch
-        id: validate-tag
+        id: validate_tag
         run: |
           set -euo pipefail
           TAG="${{ steps.resolve.outputs.tag }}"
@@ -102,8 +110,9 @@ jobs:
           echo "source_sha=${TAG_COMMIT}" >> "$GITHUB_OUTPUT"
 
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            if [ "$TAG_COMMIT" != "$GITHUB_SHA" ]; then
-              echo "::error::tag ${TAG} points to ${TAG_COMMIT} but source_ref is ${GITHUB_SHA}; pass the ref the tag points at"
+            SOURCE_COMMIT=$(git rev-parse HEAD)
+            if [ "$TAG_COMMIT" != "$SOURCE_COMMIT" ]; then
+              echo "::error::tag ${TAG} points to ${TAG_COMMIT} but checked-out source_ref points to ${SOURCE_COMMIT}; pass the ref the tag points at"
               exit 1
             fi
           fi
@@ -112,7 +121,7 @@ jobs:
           if git merge-base --is-ancestor "$TAG_COMMIT" refs/remotes/origin/main; then
             IS_ANCESTOR=1
           elif [ "$PRERELEASE" = "true" ]; then
-            for r in $(git for-each-ref --format='%(refname)' refs/remotes/origin/release); do
+            for r in $(git for-each-ref --format='%(refname)' 'refs/remotes/origin/release/*'); do
               if git merge-base --is-ancestor "$TAG_COMMIT" "$r"; then
                 IS_ANCESTOR=1
                 break
@@ -126,19 +135,23 @@ jobs:
           echo "::notice::tag ${TAG} (${TAG_COMMIT}) validated"
 
       - name: Check for existing release
-        id: check-existing
+        id: check_existing
         run: |
           set -euo pipefail
           TAG="${{ steps.resolve.outputs.tag }}"
-          if gh release view "$TAG" --json tagName,targetCommitish >/dev/null 2>/tmp/release_query.err; then
-            TARGET=$(gh release view "$TAG" --json targetCommitish --jq .targetCommitish)
-            TAG_COMMIT="${{ steps.validate-tag.outputs.source_sha }}"
-            if [ "$TARGET" != "$TAG_COMMIT" ]; then
-              echo "::error::release ${TAG} already exists targeting ${TARGET}, but tag points at ${TAG_COMMIT}"
+          if RELEASE_JSON=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" 2>/tmp/release_query.err); then
+            RELEASE_TAG=$(jq -r '.tag_name // empty' <<<"$RELEASE_JSON")
+            if [ "$RELEASE_TAG" != "$TAG" ]; then
+              echo "::error::release lookup returned tag ${RELEASE_TAG:-<empty>}, expected ${TAG}"
               exit 1
             fi
+            # targetCommitish is release metadata, not the commit resolved by
+            # the Git tag. GitHub commonly stores "main" here even when the
+            # tag itself points at a specific commit SHA. The tag commit was
+            # already validated in the previous step.
             echo "release_exists=true" >> "$GITHUB_OUTPUT"
-          elif grep -qi "not found" /tmp/release_query.err; then
+            echo "::notice::release ${TAG} already exists; reusing it"
+          elif grep -Eqi "not found|404" /tmp/release_query.err; then
             echo "release_exists=false" >> "$GITHUB_OUTPUT"
           else
             echo "::error::failed to query release ${TAG}: $(cat /tmp/release_query.err)"
@@ -157,14 +170,14 @@ jobs:
     environment:
       name: ${{ needs.resolve-release.outputs.is_prerelease == 'false' && 'production-release' || 'prerelease-release' }}
     outputs:
-      release_id: ${{ steps.ensure-draft.outputs.release_id }}
+      release_id: ${{ steps.ensure_draft.outputs.release_id }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.resolve-release.outputs.source_sha }}
 
       - name: Ensure draft release exists
-        id: ensure-draft
+        id: ensure_draft
         run: |
           set -euo pipefail
           TAG="${{ needs.resolve-release.outputs.tag }}"
@@ -486,8 +499,17 @@ jobs:
       group: release-latest-reconcile
       cancel-in-progress: false
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve-release.outputs.source_sha }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
       - name: Set Latest to highest stable release
         run: |
+          set -euo pipefail
           node scripts/reconcile-release-state.mjs set-latest \
             --tag "${{ needs.resolve-release.outputs.tag }}"
 

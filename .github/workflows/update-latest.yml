@@ -60,7 +60,8 @@ jobs:
 
       # sync-updater creates/reads the fixed `update` release (prerelease=true,
       # make_latest=false), uploads latest.json, re-downloads it for a
-      # byte-for-byte check, and asserts isPrerelease=true / isLatest=false.
+      # byte-for-byte check, and asserts isPrerelease=true / update is not the
+      # repository's latest stable release.
       - name: Sync update release
         run: |
           node scripts/reconcile-release-state.mjs sync-updater \

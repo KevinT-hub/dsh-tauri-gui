@@ -1,6 +1,6 @@
 /**
  * Tests for scripts/rename-bundles.mjs run as a subprocess against a
- * temporary bundle directory. Run: node --test scripts/rename-bundles.test.mjs
+ * temporary bundle directory. Run: node --test tests/rename-bundles.test.mjs
  */
 
 import { test } from "node:test";

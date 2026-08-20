@@ -20,7 +20,7 @@
     "bundle:rename": "node scripts/rename-bundles.mjs",
     "version:check": "node scripts/release-version.mjs check-files",
     "version:set": "node scripts/version-set.mjs",
-    "test:scripts": "node --test scripts/*.test.mjs"
+    "test:scripts": "node --test tests/*.test.mjs"
   },
   "dependencies": {
     "@material/web": "^2.5.0",
