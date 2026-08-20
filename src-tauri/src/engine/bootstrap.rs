@@ -227,39 +227,6 @@ fn node_version_supported(version: &str) -> bool {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::parse_node_version_output;
-
-    #[test]
-    fn parses_node_version_output() {
-        assert_eq!(
-            parse_node_version_output("v22.19.0\n").as_deref(),
-            Some("22.19.0")
-        );
-        assert_eq!(
-            parse_node_version_output("v24.1.2").as_deref(),
-            Some("24.1.2")
-        );
-        assert_eq!(
-            parse_node_version_output("  v20.11.1  ").as_deref(),
-            Some("20.11.1")
-        );
-        assert_eq!(parse_node_version_output(""), None);
-        assert_eq!(parse_node_version_output("v\n"), None);
-    }
-
-    #[test]
-    fn node_version_support_window_matches_official_engines() {
-        assert!(super::node_version_supported("22.19.0"));
-        assert!(super::node_version_supported("22.99.0"));
-        assert!(super::node_version_supported("24.0.0"));
-        assert!(!super::node_version_supported("22.18.9"));
-        assert!(!super::node_version_supported("20.11.1"));
-        assert!(!super::node_version_supported("23.0.0"));
-    }
-}
-
 pub fn runtime_info(runtime_dir: &Path) -> Result<RuntimeInfo, String> {
     let node_exe = node_path(runtime_dir);
     if !node_exe.exists() {
@@ -775,4 +742,37 @@ pub fn startup(app: AppHandle, state: Arc<AppState>) {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_node_version_output;
+
+    #[test]
+    fn parses_node_version_output() {
+        assert_eq!(
+            parse_node_version_output("v22.19.0\n").as_deref(),
+            Some("22.19.0")
+        );
+        assert_eq!(
+            parse_node_version_output("v24.1.2").as_deref(),
+            Some("24.1.2")
+        );
+        assert_eq!(
+            parse_node_version_output("  v20.11.1  ").as_deref(),
+            Some("20.11.1")
+        );
+        assert_eq!(parse_node_version_output(""), None);
+        assert_eq!(parse_node_version_output("v\n"), None);
+    }
+
+    #[test]
+    fn node_version_support_window_matches_official_engines() {
+        assert!(super::node_version_supported("22.19.0"));
+        assert!(super::node_version_supported("22.99.0"));
+        assert!(super::node_version_supported("24.0.0"));
+        assert!(!super::node_version_supported("22.18.9"));
+        assert!(!super::node_version_supported("20.11.1"));
+        assert!(!super::node_version_supported("23.0.0"));
+    }
 }

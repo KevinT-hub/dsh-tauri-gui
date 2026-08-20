@@ -1,0 +1,58 @@
+{
+  "tag_name": "v1.2.3",
+  "draft": false,
+  "prerelease": false,
+  "published_at": "2026-01-01T00:00:00Z",
+  "assets": [
+    {
+      "name": "dsh-tauri-gui_1.2.3_Windows_x64-setup.exe",
+      "browser_download_url": "https://example.com/windows.exe",
+      "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    {
+      "name": "dsh-tauri-gui_1.2.3_Windows_x64-setup.exe.sig",
+      "browser_download_url": "https://example.com/windows.exe.sig",
+      "digest": null
+    },
+    {
+      "name": "dsh-tauri-gui-1.2.3-Linux-x86_64.AppImage",
+      "browser_download_url": "https://example.com/linux.AppImage",
+      "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    {
+      "name": "dsh-tauri-gui-1.2.3-Linux-x86_64.AppImage.sig",
+      "browser_download_url": "https://example.com/linux.AppImage.sig",
+      "digest": null
+    },
+    {
+      "name": "dsh-tauri-gui_1.2.3_macOS_x64.app.tar.gz",
+      "browser_download_url": "https://example.com/macos-x64.tar.gz",
+      "digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    {
+      "name": "dsh-tauri-gui_1.2.3_macOS_x64.app.tar.gz.sig",
+      "browser_download_url": "https://example.com/macos-x64.tar.gz.sig",
+      "digest": null
+    },
+    {
+      "name": "dsh-tauri-gui_1.2.3_macOS_aarch64.app.tar.gz",
+      "browser_download_url": "https://example.com/macos-aarch64.tar.gz",
+      "digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+    },
+    {
+      "name": "dsh-tauri-gui_1.2.3_macOS_aarch64.app.tar.gz.sig",
+      "browser_download_url": "https://example.com/macos-aarch64.tar.gz.sig",
+      "digest": null
+    },
+    {
+      "name": "dsh-tauri-gui_1.2.3_Linux_amd64.deb",
+      "browser_download_url": "https://example.com/linux.deb",
+      "digest": "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+    },
+    {
+      "name": "dsh-tauri-gui_1.2.3_Linux_amd64.deb.sig",
+      "browser_download_url": "https://example.com/linux.deb.sig",
+      "digest": null
+    }
+  ]
+}

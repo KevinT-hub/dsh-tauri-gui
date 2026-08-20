@@ -3,17 +3,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum RuntimeMode {
+    #[default]
     Bundled,
     System,
-}
-
-impl Default for RuntimeMode {
-    fn default() -> Self {
-        Self::Bundled
-    }
 }
 
 /// Desktop-shell settings. The dsh engine itself keeps its official config
