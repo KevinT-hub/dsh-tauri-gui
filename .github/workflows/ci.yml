@@ -10,7 +10,7 @@ on:
   pull_request:
   workflow_dispatch:
 
-# CI never writes; publishing is handled by release.yml.
+# CI never publishes releases; the audit job may write only its Check Run.
 permissions:
   contents: read
 
@@ -112,10 +112,44 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
 
+      # Building @deepseek-ai/dsh pulls hundreds of npm packages and is the
+      # dominant cost of this job. Cache the finished, platform-specific
+      # bundle; the smoke tests below still validate both the unpacked runtime
+      # and the exact archive shipped by the installer.
+      - name: Restore prepared runtime bundle
+        id: runtime-bundle-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            src-tauri/resources/runtime.tar.gz
+            src-tauri/resources/runtime.json
+          key: runtime-bundle-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/runtime-versions.json', 'scripts/prepare-runtime.mjs') }}
+
+      # Keep the package-manager and Node archive caches as a fallback for a
+      # cache miss or an intentional runtime-bundle key refresh.
+      - name: Cache runtime download inputs
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/dsh-tauri-gui
+            ~/.npm
+          key: runtime-inputs-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/runtime-versions.json', 'scripts/prepare-runtime.mjs') }}
+          restore-keys: |
+            runtime-inputs-v1-${{ runner.os }}-${{ runner.arch }}-
+
       - name: Prepare pruned runtime bundle
+        if: steps.runtime-bundle-cache.outputs.cache-hit != 'true'
         run: node scripts/prepare-runtime.mjs --package --target "$RUNNER_TEMP/dsh-runtime" --keep
         env:
           DSH_TAURI_NPM_REGISTRY: https://registry.npmjs.org
+
+      - name: Unpack cached runtime bundle
+        if: steps.runtime-bundle-cache.outputs.cache-hit == 'true'
+        run: |
+          set -euo pipefail
+          rm -rf "$RUNNER_TEMP/dsh-runtime"
+          mkdir -p "$RUNNER_TEMP/dsh-runtime"
+          tar -xzf src-tauri/resources/runtime.tar.gz -C "$RUNNER_TEMP/dsh-runtime"
 
       - name: Smoke test the pruned runtime
         run: node scripts/smoke-runtime.mjs --runtime "$RUNNER_TEMP/dsh-runtime"
@@ -135,6 +169,12 @@ jobs:
     name: Dependency audit (non-blocking)
     runs-on: ubuntu-22.04
     continue-on-error: true
+    # rustsec/audit-check publishes its advisory summary as a Check Run.
+    # Keep this permission scoped to the non-blocking audit job; fork PRs are
+    # still handled by the action's read-only fallback.
+    permissions:
+      contents: read
+      checks: write
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
