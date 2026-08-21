@@ -202,9 +202,38 @@ jobs:
   # 3. build: platform matrix. Every platform builds the exact tag commit
   #    with the pinned Rust toolchain and produces a bundle-manifest.json.
   # ---------------------------------------------------------------------
+  resolve-runtime:
+    name: Resolve latest runtime versions
+    runs-on: ubuntu-latest
+    outputs:
+      node_version: ${{ steps.resolve.outputs.node_version }}
+      dsh_version: ${{ steps.resolve.outputs.dsh_version }}
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Resolve latest LTS Node and dsh versions
+        id: resolve
+        shell: bash
+        run: |
+          set -euo pipefail
+          NODE_VERSION=$(node --input-type=module -e '
+            const releases = await (await fetch("https://nodejs.org/dist/index.json")).json();
+            const latest = releases.find((release) => release.lts && /^v\d+\.\d+\.\d+$/.test(release.version));
+            if (!latest) throw new Error("no latest LTS Node release found");
+            process.stdout.write(latest.version.slice(1));
+          ')
+          DSH_VERSION=$(npm view @deepseek-ai/dsh dist-tags.latest --json --registry=https://registry.npmjs.org | tr -d '"')
+          [[ "$NODE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::invalid Node version: $NODE_VERSION"; exit 1; }
+          [[ "$DSH_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || { echo "::error::invalid dsh version: $DSH_VERSION"; exit 1; }
+          echo "node_version=$NODE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "dsh_version=$DSH_VERSION" >> "$GITHUB_OUTPUT"
+          echo "::notice::runtime Node $NODE_VERSION; @deepseek-ai/dsh $DSH_VERSION"
+
   build:
     name: Build ${{ matrix.artifact }}
-    needs: [resolve-release]
+    needs: [resolve-release, resolve-runtime]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -267,12 +296,37 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile --registry=https://registry.npmjs.org
 
+      - name: Restore prepared runtime bundle
+        id: runtime-bundle-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            src-tauri/resources/runtime.tar.gz
+            src-tauri/resources/runtime.json
+          key: runtime-bundle-v2-${{ runner.os }}-${{ runner.arch }}-node-${{ needs.resolve-runtime.outputs.node_version }}-dsh-${{ needs.resolve-runtime.outputs.dsh_version }}-${{ hashFiles('scripts/runtime-versions.json', 'scripts/prepare-runtime.mjs') }}
+
       - name: Prepare self-contained dsh runtime
+        if: steps.runtime-bundle-cache.outputs.cache-hit != 'true'
         run: pnpm run runtime:package
+        env:
+          DSH_TAURI_NODE_VERSION: ${{ needs.resolve-runtime.outputs.node_version }}
+          DSH_TAURI_DSH_VERSION: ${{ needs.resolve-runtime.outputs.dsh_version }}
+
+      - name: Validate updater signing secrets
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          [[ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]] || { echo "::error::TAURI_SIGNING_PRIVATE_KEY is not configured"; exit 1; }
+          [[ -n "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}" ]] || { echo "::error::TAURI_SIGNING_PRIVATE_KEY_PASSWORD is not configured"; exit 1; }
+          [[ "$TAURI_SIGNING_PRIVATE_KEY" == untrusted\ comment:* ]] || { echo "::error::TAURI_SIGNING_PRIVATE_KEY is not a minisign private key"; exit 1; }
 
       # Guards against compile-only placeholders (from --test-resource) ever
       # reaching a release build.
       - name: Assert runtime resources are real
+        shell: bash
         run: |
           set -euo pipefail
           node -e "
@@ -295,6 +349,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
       - name: Rename bundles to release naming convention
+        shell: bash
         run: node scripts/rename-bundles.mjs \
           --dir "src-tauri/target/${{ matrix.target }}/release/bundle" \
           --version "${{ needs.resolve-release.outputs.version }}" \

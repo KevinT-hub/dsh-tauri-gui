@@ -50,9 +50,13 @@ const RUNTIME_VERSIONS_PATH = join(ROOT, "scripts", "runtime-versions.json");
 
 const RUNTIME_VERSIONS = JSON.parse(readFileSync(RUNTIME_VERSIONS_PATH, "utf8"));
 
-const NODE_VERSION = process.env.DSH_TAURI_NODE_VERSION ?? RUNTIME_VERSIONS.node;
+const NODE_VERSION_SPEC = String(
+  process.env.DSH_TAURI_NODE_VERSION ?? RUNTIME_VERSIONS.node,
+).trim();
 const PNPM_VERSION = process.env.DSH_TAURI_PNPM_VERSION ?? RUNTIME_VERSIONS.pnpm;
-const DSH_VERSION = process.env.DSH_TAURI_DSH_VERSION ?? RUNTIME_VERSIONS.dsh;
+const DSH_VERSION_SPEC = String(
+  process.env.DSH_TAURI_DSH_VERSION ?? RUNTIME_VERSIONS.dsh,
+).trim();
 const REGISTRY =
   process.env.DSH_TAURI_NPM_REGISTRY ?? "https://registry.npmmirror.com";
 const FALLBACK_REGISTRY = "https://registry.npmjs.org";
@@ -65,6 +69,10 @@ const NPM_FETCH_RETRY_ARGS = [
   "--fetch-retry-mintimeout=1000",
   "--fetch-retry-maxtimeout=30000",
 ];
+// npm resolves the dsh dependency graph in the bundled Node process. The
+// default V8 heap is too small for that graph on GitHub's macOS runners.
+const NPM_NODE_OPTIONS =
+  process.env.DSH_TAURI_NPM_NODE_OPTIONS ?? "--max-old-space-size=4096";
 const PLATFORM_KEY = `${process.platform}-${process.arch}`;
 const PRUNE_DIRS = new Set([
   "examples",
@@ -144,7 +152,97 @@ function removePath(full) {
   }
 }
 
-function nodeDistInfo() {
+async function fetchJson(url) {
+  const response = await fetch(url, {
+    headers: { accept: "application/json" },
+    signal: AbortSignal.timeout(20000),
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return response.json();
+}
+
+function isPackageVersion(value) {
+  return /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(String(value));
+}
+
+async function resolveNodeVersion() {
+  if (/^\d+\.\d+\.\d+$/.test(NODE_VERSION_SPEC)) {
+    return NODE_VERSION_SPEC;
+  }
+
+  const majorMatch = /^(?:v)?(\d+)(?:\.x)?$/.exec(NODE_VERSION_SPEC);
+  if (!majorMatch && NODE_VERSION_SPEC !== "latest") {
+    fail(`invalid Node version spec "${NODE_VERSION_SPEC}" (use 22, latest, or x.y.z)`);
+  }
+
+  const urls = [
+    `${OFFICIAL_NODE_BASE}/index.json`,
+    `${NODE_MIRROR}/index.json`,
+  ];
+  let releases = null;
+  let lastError = null;
+  for (const url of [...new Set(urls)]) {
+    try {
+      releases = await fetchJson(url);
+      break;
+    } catch (error) {
+      lastError = `${url}: ${error?.message ?? error}`;
+      console.warn(`[runtime] Node release index fetch failed: ${lastError}`);
+    }
+  }
+  if (!Array.isArray(releases)) {
+    fail(`cannot resolve Node version from release indexes: ${lastError}`);
+  }
+
+  const candidates = releases.filter((release) => {
+    const version = String(release?.version ?? "");
+    if (!/^v\d+\.\d+\.\d+$/.test(version)) return false;
+    if (majorMatch && !version.startsWith(`v${majorMatch[1]}.`)) return false;
+    return NODE_VERSION_SPEC === "latest" ? Boolean(release.lts) : true;
+  });
+  const selected = candidates.find((release) => release.lts) ?? candidates[0];
+  if (!selected) {
+    fail(`no stable Node release matches "${NODE_VERSION_SPEC}"`);
+  }
+  const version = String(selected.version).replace(/^v/, "");
+  console.log(`[runtime] resolved Node ${NODE_VERSION_SPEC} -> ${version}`);
+  return version;
+}
+
+function npmDistTagsUrl(registry, packageName) {
+  const encodedName = packageName.replace("/", "%2f");
+  return `${registry.replace(/\/+$/, "")}/-/package/${encodedName}/dist-tags`;
+}
+
+async function resolveDshVersion() {
+  if (isPackageVersion(DSH_VERSION_SPEC)) return DSH_VERSION_SPEC;
+  if (!/^[A-Za-z][A-Za-z0-9._-]*$/.test(DSH_VERSION_SPEC)) {
+    fail(`invalid dsh version spec "${DSH_VERSION_SPEC}"`);
+  }
+
+  let lastError = null;
+  for (const registry of npmRegistries()) {
+    try {
+      const tags = await fetchJson(
+        npmDistTagsUrl(registry, "@deepseek-ai/dsh"),
+      );
+      const version = tags?.[DSH_VERSION_SPEC];
+      if (!isPackageVersion(version)) {
+        throw new Error(`dist-tag ${DSH_VERSION_SPEC} is not a package version`);
+      }
+      console.log(
+        `[runtime] resolved @deepseek-ai/dsh ${DSH_VERSION_SPEC} -> ${version}`,
+      );
+      return version;
+    } catch (error) {
+      lastError = `${registry}: ${error?.message ?? error}`;
+      console.warn(`[runtime] dsh dist-tag fetch failed: ${lastError}`);
+    }
+  }
+  fail(`cannot resolve @deepseek-ai/dsh@${DSH_VERSION_SPEC}: ${lastError}`);
+}
+
+function nodeDistInfo(nodeVersion) {
   const platform = process.platform;
   const arch = process.arch;
   const map = {
@@ -158,9 +256,10 @@ function nodeDistInfo() {
   const info = map[`${platform}-${arch}`];
   if (!info) fail(`unsupported platform/arch: ${platform}/${arch}`);
   return {
+    version: nodeVersion,
     ...info,
-    base: `node-v${NODE_VERSION}-${info.dir}`,
-    url: `${NODE_MIRROR}/v${NODE_VERSION}/node-v${NODE_VERSION}-${info.dir}.${info.file}`,
+    base: `node-v${nodeVersion}-${info.dir}`,
+    url: `${NODE_MIRROR}/v${nodeVersion}/node-v${nodeVersion}-${info.dir}.${info.file}`,
   };
 }
 
@@ -261,8 +360,8 @@ function nodeArchiveUrls(info) {
   const name = `${info.base}.${info.file}`;
   return [
     ...new Set([
-      `${NODE_MIRROR}/v${NODE_VERSION}/${name}`,
-      `${OFFICIAL_NODE_BASE}/v${NODE_VERSION}/${name}`,
+      `${NODE_MIRROR}/v${info.version}/${name}`,
+      `${OFFICIAL_NODE_BASE}/v${info.version}/${name}`,
     ]),
   ];
 }
@@ -287,8 +386,8 @@ async function expectedNodeChecksum(info) {
   const fileName = `${info.base}.${info.file}`;
   const urls = [
     ...new Set([
-      `${OFFICIAL_NODE_BASE}/v${NODE_VERSION}/SHASUMS256.txt`,
-      `${NODE_MIRROR}/v${NODE_VERSION}/SHASUMS256.txt`,
+      `${OFFICIAL_NODE_BASE}/v${info.version}/SHASUMS256.txt`,
+      `${NODE_MIRROR}/v${info.version}/SHASUMS256.txt`,
     ]),
   ];
   for (const url of urls) {
@@ -305,7 +404,7 @@ async function expectedNodeChecksum(info) {
       console.warn(`[runtime] checksum fetch failed (${url}): ${error?.message ?? error}`);
     }
   }
-  fail(`cannot obtain SHASUMS256.txt for node v${NODE_VERSION}`);
+  fail(`cannot obtain SHASUMS256.txt for node ${info.base}`);
   return "";
 }
 
@@ -367,12 +466,19 @@ async function download(urls, dest, label) {
   fail(`failed to download ${label}: ${lastError}`);
 }
 
-async function prepareNode(target, cacheDir) {
-  const info = nodeDistInfo();
+async function prepareNode(target, cacheDir, nodeVersion) {
+  const info = nodeDistInfo(nodeVersion);
   const nodeRoot = join(target, "node");
   if (existsSync(nodeBinary(nodeRoot))) {
-    console.log(`[runtime] node already prepared at ${nodeRoot}`);
-    return nodeRoot;
+    const existingVersion = readNodeVersion(nodeRoot);
+    if (existingVersion === nodeVersion) {
+      console.log(`[runtime] node ${existingVersion} already prepared at ${nodeRoot}`);
+      return nodeRoot;
+    }
+    console.log(
+      `[runtime] replacing node ${existingVersion} with requested ${nodeVersion}`,
+    );
+    removePath(nodeRoot);
   }
   const cachePath = join(cacheDir, `${info.base}.${info.file}`);
   await download(nodeArchiveUrls(info), cachePath, info.base);
@@ -382,7 +488,9 @@ async function prepareNode(target, cacheDir) {
   mkdirSync(extractDir, { recursive: true });
   extractArchive(cachePath, extractDir);
   const extracted = join(extractDir, info.base);
-  if (!existsSync(extracted)) fail(`node archive did not contain ${info.base}`);
+  if (!existsSync(extracted)) {
+    fail(`node archive did not contain ${info.base}`);
+  }
   removePath(nodeRoot);
   run("node", [
     "-e",
@@ -418,22 +526,37 @@ function nodeBinary(nodeRoot) {
     : join(nodeRoot, "bin", "node");
 }
 
-function installDsh(nodeRoot, target, refresh) {
+function installDsh(nodeRoot, target, dshVersion, refresh) {
   const appDir = join(target, "app");
-  if (
-    !refresh &&
-    existsSync(join(appDir, "node_modules", "@deepseek-ai", "dsh", "package.json"))
-  ) {
-    console.log(`[runtime] @deepseek-ai/dsh already prepared at ${appDir}`);
-    return;
+  const dshPackage = join(
+    appDir,
+    "node_modules",
+    "@deepseek-ai",
+    "dsh",
+    "package.json",
+  );
+  if (!refresh && existsSync(dshPackage)) {
+    const installedVersion = readVersion(dshPackage);
+    if (installedVersion === dshVersion) {
+      console.log(
+        `[runtime] @deepseek-ai/dsh ${installedVersion} already prepared at ${appDir}`,
+      );
+      return;
+    }
+    console.log(
+      `[runtime] replacing @deepseek-ai/dsh ${installedVersion} with ${dshVersion}`,
+    );
+    removePath(appDir);
   }
-  mkdirSync(appDir, { recursive: true });
+  if (!existsSync(appDir)) {
+    mkdirSync(appDir, { recursive: true });
+  }
   const npmArgs = [
     npmCli(nodeRoot),
     "install",
     "--prefix",
     appDir,
-    `@deepseek-ai/dsh@${DSH_VERSION}`,
+    `@deepseek-ai/dsh@${dshVersion}`,
     ...NPM_FETCH_RETRY_ARGS,
     "--registry",
     REGISTRY,
@@ -445,22 +568,29 @@ function installDsh(nodeRoot, target, refresh) {
   installWithRegistryFallback(nodeBinary(nodeRoot), npmArgs, { cwd: appDir }, "@deepseek-ai/dsh");
 }
 
-function installPnpm(nodeRoot, target, refresh) {
+function installPnpm(nodeRoot, target, pnpmVersion, refresh) {
   const toolsDir = join(target, "tools");
-  if (
-    !refresh &&
-    existsSync(join(toolsDir, "node_modules", "pnpm", "package.json"))
-  ) {
-    console.log(`[runtime] pnpm already prepared at ${toolsDir}`);
-    return;
+  const pnpmPackage = join(toolsDir, "node_modules", "pnpm", "package.json");
+  if (!refresh && existsSync(pnpmPackage)) {
+    const installedVersion = readVersion(pnpmPackage);
+    if (installedVersion === pnpmVersion) {
+      console.log(`[runtime] pnpm ${installedVersion} already prepared at ${toolsDir}`);
+      return;
+    }
+    console.log(
+      `[runtime] replacing pnpm ${installedVersion} with ${pnpmVersion}`,
+    );
+    removePath(toolsDir);
   }
-  mkdirSync(toolsDir, { recursive: true });
+  if (!existsSync(toolsDir)) {
+    mkdirSync(toolsDir, { recursive: true });
+  }
   const npmArgs = [
     npmCli(nodeRoot),
     "install",
     "--prefix",
     toolsDir,
-    `pnpm@${PNPM_VERSION}`,
+    `pnpm@${pnpmVersion}`,
     ...NPM_FETCH_RETRY_ARGS,
     "--registry",
     REGISTRY,
@@ -479,7 +609,14 @@ function installWithRegistryFallback(nodeBinaryPath, npmArgs, options, label) {
     const registryIndex = args.indexOf("--registry");
     if (registryIndex >= 0) args.splice(registryIndex, 2);
     args.push("--registry", registry);
-    const error = spawnResult(nodeBinaryPath, args, options);
+    const error = spawnResult(nodeBinaryPath, args, {
+      ...options,
+      env: {
+        ...process.env,
+        ...(options.env ?? {}),
+        NODE_OPTIONS: options.env?.NODE_OPTIONS ?? NPM_NODE_OPTIONS,
+      },
+    });
     if (!error) return;
     lastError = `${registry}: ${error}`;
     console.warn(`[runtime] ${label} install failed via ${registry}: ${error}`);
@@ -687,6 +824,8 @@ async function main() {
     pruneRuntime(target);
     return;
   }
+  const nodeVersion = await resolveNodeVersion();
+  const dshVersion = await resolveDshVersion();
   mkdirSync(target, { recursive: true });
   const cacheDir = join(
     process.env.DSH_TAURI_NODE_CACHE ??
@@ -697,9 +836,9 @@ async function main() {
         "dsh-tauri-gui",
       ),
   );
-  const nodeRoot = await prepareNode(target, cacheDir);
-  installDsh(nodeRoot, target, options.refresh);
-  installPnpm(nodeRoot, target, options.refresh);
+  const nodeRoot = await prepareNode(target, cacheDir, nodeVersion);
+  installDsh(nodeRoot, target, dshVersion, options.refresh);
+  installPnpm(nodeRoot, target, PNPM_VERSION, options.refresh);
   pruneRuntime(target);
   const manifest = writeManifest(target);
   console.log(
