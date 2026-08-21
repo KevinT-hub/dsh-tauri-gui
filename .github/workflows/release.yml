@@ -321,7 +321,7 @@ jobs:
           set -euo pipefail
           [[ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]] || { echo "::error::TAURI_SIGNING_PRIVATE_KEY is not configured"; exit 1; }
           [[ -n "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}" ]] || { echo "::error::TAURI_SIGNING_PRIVATE_KEY_PASSWORD is not configured"; exit 1; }
-          [[ "$TAURI_SIGNING_PRIVATE_KEY" == untrusted\ comment:* ]] || { echo "::error::TAURI_SIGNING_PRIVATE_KEY is not a minisign private key"; exit 1; }
+          echo "Updater signing secrets are present; Tauri will validate the key and password during signing."
 
       # Guards against compile-only placeholders (from --test-resource) ever
       # reaching a release build.
