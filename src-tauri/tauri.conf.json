@@ -42,6 +42,7 @@
     }
   },
   "bundle": {
+    "publisher": "dsh-tauri-gui",
     "active": true,
     "targets": "all",
     "resources": [
