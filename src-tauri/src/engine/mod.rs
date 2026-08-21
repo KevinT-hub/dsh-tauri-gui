@@ -113,6 +113,16 @@ fn effective_port(state: &AppState) -> u16 {
     }
 }
 
+/// dsh opens the default browser unless this flag is present; the Tauri
+/// WebView is the only UI surface owned by the desktop shell.
+fn append_web_command_args(command: &mut Command, port: u16) {
+    command
+        .arg("web")
+        .arg("--no-open")
+        .arg("--port")
+        .arg(port.to_string());
+}
+
 /// Probe whether an official `dsh web` instance is already serving the
 /// configured port. If it is, the desktop app connects to it instead of
 /// spawning a second engine, so config/sessions stay in one service area.
@@ -176,10 +186,8 @@ fn spawn_engine_inner(app: &AppHandle, state: &Arc<AppState>) -> Result<(), Stri
 
     let mut cmd = dsh_command(&runtime);
     hide_console(&mut cmd);
-    cmd.arg("web")
-        .arg("--port")
-        .arg(port.to_string())
-        .current_dir(workspace_dir(&config))
+    append_web_command_args(&mut cmd, port);
+    cmd.current_dir(workspace_dir(&config))
         .env("DSH_HOME", &state.engine_home)
         .env(
             "DSH_TELEMETRY_DISABLED",
@@ -616,6 +624,24 @@ pub fn open_web_ui(app: &AppHandle, state: &Arc<AppState>) -> Result<(), String>
     // The window is revealed by on_page_load after the Web UI has painted,
     // so there is no black flash during the transition.
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::append_web_command_args;
+    use std::process::Command;
+
+    #[test]
+    fn dsh_web_command_disables_default_browser() {
+        let mut command = Command::new("dsh");
+        append_web_command_args(&mut command, 3080);
+
+        let args = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(args, vec!["web", "--no-open", "--port", "3080"]);
+    }
 }
 
 /// Open the running Web UI in the system default browser.

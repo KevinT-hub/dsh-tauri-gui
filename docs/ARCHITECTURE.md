@@ -80,7 +80,7 @@ flowchart TD
 
 `src-tauri/src/engine` 管理官方 `dsh web` 进程：
 
-- 启动命令：`<node> <dsh-bin> web --port <port>`，默认端口 3080（可在配置中修改，0 表示系统分配）。
+- 启动命令：`<node> <dsh-bin> web --no-open --port <port>`，默认端口 3080（可在配置中修改，0 表示系统分配）。`--no-open` 禁止 dsh 将同一地址交给系统默认浏览器，由 Tauri WebView 负责呈现。
 - 环境变量：`DSH_HOME`（默认 `~/.dsh`，可覆盖）、`DSH_TELEMETRY_DISABLED`（默认 `1`）、`npm_config_registry`、`NO_COLOR=1`，以及把 bundled 的 node/pnpm/dsh 注入 `PATH`。
 - **连接或拉起（connect-or-spawn）**：启动前先探测端口上是否已有 `dsh web` 实例（通过 `__DSH_BOOT__` 标记识别）；有则直接连接，避免重复拉起导致配置/会话分散。
 - **监控与自重启**：独立线程泵取 stdout/stderr 日志并监控退出码；`restart_on_crash` 为真时 2 秒后自动重启。若端口被占用（`EADDRINUSE`/`EACCES`），自动回退到系统分配端口。

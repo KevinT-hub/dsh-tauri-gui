@@ -7,7 +7,7 @@
  *   node scripts/smoke-runtime.mjs --archive <runtime.tar.gz>
  *
  * Verifies that a (possibly pruned) runtime can actually serve the official
- * web UI: Node/dsh versions resolve, `dsh web --port 0` starts, the ready
+ * web UI: Node/dsh versions resolve, `dsh web --no-open --port 0` starts, the ready
  * line is emitted, HTTP answers with `__DSH_BOOT__`, and the port is
  * released after the process tree is terminated.
  */
@@ -164,8 +164,8 @@ async function main() {
     const cwd = join(tempRoot, "workspace");
     mkdirSync(cwd, { recursive: true });
 
-    console.log("[smoke] launching dsh web --port 0 ...");
-    const child = spawn(node, [dshBin, "web", "--port", "0"], {
+    console.log("[smoke] launching dsh web --no-open --port 0 ...");
+    const child = spawn(node, [dshBin, "web", "--no-open", "--port", "0"], {
       cwd,
       env: {
         ...process.env,
