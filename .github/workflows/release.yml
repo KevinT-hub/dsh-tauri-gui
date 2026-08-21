@@ -350,12 +350,13 @@ jobs:
 
       - name: Rename bundles to release naming convention
         shell: bash
-        run: node scripts/rename-bundles.mjs \
-          --dir "src-tauri/target/${{ matrix.target }}/release/bundle" \
-          --version "${{ needs.resolve-release.outputs.version }}" \
-          --platform "${{ matrix.bundle_platform }}" \
-          --arch "${{ matrix.bundle_arch }}" \
-          --target "${{ matrix.target }}"
+        run: |
+          node scripts/rename-bundles.mjs \
+            --dir "src-tauri/target/${{ matrix.target }}/release/bundle" \
+            --version "${{ needs.resolve-release.outputs.version }}" \
+            --platform "${{ matrix.bundle_platform }}" \
+            --arch "${{ matrix.bundle_arch }}" \
+            --target "${{ matrix.target }}"
 
       - name: Sign macOS DMG
         if: matrix.bundle_platform == 'macos'
