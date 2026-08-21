@@ -423,13 +423,15 @@ jobs:
           path: artifacts
 
       - name: Verify asset manifest across platforms
+        env:
+          EXPECTED_VERSION: ${{ needs.resolve-release.outputs.version }}
         run: |
           set -euo pipefail
           node -e "
             const fs = require('fs');
             const path = require('path');
             const { execSync } = require('child_process');
-            const expected = process.argv[2];
+            const expected = process.env.EXPECTED_VERSION;
             const manifests = execSync('find artifacts -name bundle-manifest.json | sort', { encoding: 'utf8' })
               .trim().split('\n').filter(Boolean);
             if (manifests.length === 0) throw new Error('no bundle-manifest.json found under artifacts/');
@@ -454,7 +456,7 @@ jobs:
               if (!platforms.has(platform)) throw new Error('missing platform artifacts: ' + platform);
             }
             console.log('asset manifest OK: ' + total + ' unique file(s) for platforms ' + [...platforms].join(', '));
-          " "${{ needs.resolve-release.outputs.version }}"
+          "
 
       - name: Upload installers to draft release
         run: |
@@ -491,12 +493,14 @@ jobs:
             --channel "$CHANNEL"
 
       - name: Validate latest.json update channels
+        env:
+          RELEASE_TAG: ${{ needs.resolve-release.outputs.tag }}
         run: |
           set -euo pipefail
           node -e "
             const fs = require('fs');
             const data = JSON.parse(fs.readFileSync('latest.json', 'utf8'));
-            const tag = process.argv[2];
+            const tag = process.env.RELEASE_TAG;
             const required = {
               'windows-x86_64': '-setup.exe',
               'darwin-x86_64': '.app.tar.gz',
@@ -520,7 +524,7 @@ jobs:
               }
             }
             console.log('latest.json update channels OK: ' + Object.keys(data.platforms).join(', '));
-          " "${{ needs.resolve-release.outputs.tag }}"
+          "
 
       - name: Upload latest.json to versioned release
         run: |
