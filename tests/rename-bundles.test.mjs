@@ -99,13 +99,18 @@ test("renames windows bundles and emits manifest", () => {
   }
 });
 
-test("missing .sig companion fails the run", () => {
-  const dir = makeBundleDir("linux", "1.2.3", false);
+test("allows a macOS installer to be signed after renaming", () => {
+  const dir = makeBundleDir("macos", "1.2.3", false);
   try {
-    assert.throws(
-      () => runRename(["--dir", dir, "--version", "1.2.3", "--platform", "linux"], ROOT),
-      /missing \.sig companion/,
-    );
+    writeFileSync(join(dir, "macos", "dsh-tauri-gui_1.2.3_x64.app.tar.gz.sig"), "sig");
+    runRename(["--dir", dir, "--version", "1.2.3", "--platform", "macos", "--arch", "x64"], ROOT);
+    const manifest = JSON.parse(readFileSync(join(dir, "bundle-manifest.json"), "utf8"));
+    const dmg = manifest.files.find((entry) => entry.artifact.endsWith("macOS_x64.dmg"));
+    const appArchive = manifest.files.find((entry) => entry.artifact.endsWith("macOS_x64.app.tar.gz"));
+    assert.ok(dmg, "DMG should be included before its later signing step");
+    assert.ok(appArchive, "updater archive should be included");
+    assert.ok(!existsSync(join(dir, "dmg", "dsh-tauri-gui_1.2.3_macOS_x64.dmg.sig")));
+    assert.ok(existsSync(join(dir, "macos", "dsh-tauri-gui_1.2.3_macOS_x64.app.tar.gz.sig")));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

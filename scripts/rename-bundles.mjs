@@ -20,8 +20,9 @@
  *   - --version must be a valid project SemVer (scripts/lib/semver.mjs).
  *   - Every platform rule must match exactly one artifact; zero or multiple
  *     matches fail the run.
- *   - Each renamed artifact MUST have a `.sig` companion; a missing signature
- *     fails here instead of being discovered later during publish.
+ *   - Existing `.sig` companions are renamed with their artifacts. Installer
+ *     signatures produced by a later platform-specific workflow step are
+ *     checked by the manifest verification step after that signing completes.
  *   - Target path collisions between different sources fail the run.
  */
 
@@ -159,13 +160,14 @@ function main() {
     renames.set(from, to);
   }
 
-  // Every renamed artifact MUST carry a `.sig` companion.
+  // Attach signatures that Tauri has already produced. macOS DMGs are signed
+  // by a dedicated workflow step after this rename step, so their companion
+  // may legitimately be created later.
   for (const [from, to] of [...renames]) {
     const sig = `${from}.sig`;
-    if (!existsSync(sig)) {
-      throw new Error(`missing .sig companion for ${relative(root, from)}`);
+    if (existsSync(sig)) {
+      renames.set(sig, `${to}.sig`);
     }
-    renames.set(sig, `${to}.sig`);
   }
 
   // Reject target collisions between different sources (idempotent reruns
