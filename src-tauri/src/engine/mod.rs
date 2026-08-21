@@ -626,6 +626,19 @@ pub fn open_web_ui(app: &AppHandle, state: &Arc<AppState>) -> Result<(), String>
     Ok(())
 }
 
+/// Open the running Web UI in the system default browser.
+pub fn open_web_ui_browser(app: &AppHandle, state: &Arc<AppState>) -> Result<(), String> {
+    let url = state
+        .ready_url
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or_else(|| "Web UI 尚未就绪".to_string())?;
+    app.opener()
+        .open_url(&url, None::<&str>)
+        .map_err(|err| format!("无法打开系统浏览器: {err}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::append_web_command_args;
@@ -642,17 +655,4 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(args, vec!["web", "--no-open", "--port", "3080"]);
     }
-}
-
-/// Open the running Web UI in the system default browser.
-pub fn open_web_ui_browser(app: &AppHandle, state: &Arc<AppState>) -> Result<(), String> {
-    let url = state
-        .ready_url
-        .lock()
-        .unwrap()
-        .clone()
-        .ok_or_else(|| "Web UI 尚未就绪".to_string())?;
-    app.opener()
-        .open_url(&url, None::<&str>)
-        .map_err(|err| format!("无法打开系统浏览器: {err}"))
 }
