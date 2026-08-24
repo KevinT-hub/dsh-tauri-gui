@@ -115,7 +115,7 @@ pub fn set_ui_theme(
         .logger
         .info(&format!("theme set to {mode} (shell + web UI)"));
     let next = theme_state(state);
-    let _ = app.emit("shell://theme", &next);
+    let _ = app.emit(crate::app::events::THEME_EVENT, &next);
     apply_window_theme(app, state);
     Ok(next)
 }
@@ -163,7 +163,7 @@ pub fn spawn_theme_watcher(app: AppHandle, state: Arc<AppState>) {
             if modified != last_modified {
                 last_modified = modified;
                 let current = theme_state(&state);
-                let _ = app.emit("shell://theme", current);
+                let _ = app.emit(crate::app::events::THEME_EVENT, current);
             }
             // Keep the native title bar in sync, including OS theme changes
             // while the shell is in "system" mode.

@@ -80,7 +80,7 @@ pub async fn download_and_install(app: AppHandle, state: Arc<AppState>) -> Resul
 
         if !started.swap(true, Ordering::Relaxed) {
             let _ = handle.emit(
-                "updater-download-progress",
+                crate::app::events::UPDATER_DOWNLOAD_EVENT,
                 UpdaterDownloadProgressEvent {
                     event: "Started".into(),
                     content_length,
@@ -93,7 +93,7 @@ pub async fn download_and_install(app: AppHandle, state: Arc<AppState>) -> Resul
         }
 
         let _ = handle.emit(
-            "updater-download-progress",
+            crate::app::events::UPDATER_DOWNLOAD_EVENT,
             UpdaterDownloadProgressEvent {
                 event: "Progress".into(),
                 content_length: None,
@@ -108,7 +108,7 @@ pub async fn download_and_install(app: AppHandle, state: Arc<AppState>) -> Resul
     let bytes = download_with_mirrors(&download_url, &expected_sha256, &mut on_chunk)?;
 
     let _ = finish_handle.emit(
-        "updater-download-progress",
+        crate::app::events::UPDATER_DOWNLOAD_EVENT,
         UpdaterDownloadProgressEvent {
             event: "Finished".into(),
             content_length: None,
@@ -156,7 +156,7 @@ where
 {
     // Mirrors are untrusted: use a clean client without tokens, cookies or
     // forwarded authorization headers.
-    let agent = netprobe::http_agent(None);
+    let agent = crate::core::http::http_agent(None);
     let response = agent
         .get(url)
         .header("Accept", "application/octet-stream")

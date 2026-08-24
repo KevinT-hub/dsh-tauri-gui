@@ -1,5 +1,5 @@
-use crate::app::config::{RuntimeMode, ShellConfig};
-use crate::app::AppState;
+use crate::app::config::ShellConfig;
+use crate::app::state::AppState;
 use crate::ui::theme;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -19,8 +19,6 @@ pub struct ShellConfigPatch {
     pub default_workspace: Option<serde_json::Value>,
     pub webui_port: Option<u32>,
     pub engine_home: Option<serde_json::Value>,
-    pub runtime_mode: Option<RuntimeMode>,
-    pub runtime_mode_selected: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -36,10 +34,8 @@ pub struct Diagnostics {
     pub app_version: String,
     pub dsh_version: Option<String>,
     pub node_version: Option<String>,
-    pub runtime_mode: Option<RuntimeMode>,
     pub shell_home: String,
     pub engine_home: String,
-    pub runtime_dir: String,
     pub logs_dir: String,
     pub webui_port: u16,
     pub status: crate::app::ShellStatus,
@@ -49,10 +45,9 @@ pub struct Diagnostics {
 #[tauri::command]
 pub fn get_diagnostics(app: AppHandle) -> Diagnostics {
     let state: Arc<AppState> = app.state::<Arc<AppState>>().inner().clone();
-    let runtime = state.runtime.lock().unwrap().clone();
-    let dsh_version = runtime.as_ref().map(|info| info.dsh_version.clone());
-    let node_version = runtime.as_ref().map(|info| info.node_version.clone());
-    let runtime_mode = runtime.map(|info| info.mode);
+    let spec = state.command_spec.lock().unwrap().clone();
+    let dsh_version = spec.as_ref().map(|spec| spec.dsh_version.clone());
+    let node_version = spec.as_ref().and_then(|spec| spec.node_version.clone());
     let webui_port = state.config.lock().unwrap().webui_port;
     let status = state.status.lock().unwrap().clone();
     let log_tail: Vec<String> = state.log_tail.lock().unwrap().iter().cloned().collect();
@@ -60,10 +55,8 @@ pub fn get_diagnostics(app: AppHandle) -> Diagnostics {
         app_version: env!("CARGO_PKG_VERSION").to_string(),
         dsh_version,
         node_version,
-        runtime_mode,
         shell_home: state.home.display().to_string(),
         engine_home: state.engine_home.display().to_string(),
-        runtime_dir: state.runtime_dir.display().to_string(),
         logs_dir: state.logs_dir.display().to_string(),
         webui_port,
         status,
@@ -94,14 +87,6 @@ pub fn shell_ready(app: AppHandle) {
 }
 
 #[tauri::command]
-pub fn enter_harness(app: AppHandle) -> Result<(), String> {
-    let state: Arc<AppState> = app.state::<Arc<AppState>>().inner().clone();
-    let app_version = env!("CARGO_PKG_VERSION").to_string();
-    crate::app::config::mark_checklist_completed(&state, &app_version);
-    crate::engine::open_web_ui(&app, &state)
-}
-
-#[tauri::command]
 pub fn shell_status(app: AppHandle) -> crate::app::ShellStatus {
     let state: Arc<AppState> = app.state::<Arc<AppState>>().inner().clone();
     let status = state.status.lock().unwrap().clone();
@@ -118,7 +103,6 @@ pub fn get_shell_config(app: AppHandle) -> ShellConfig {
 #[tauri::command]
 pub fn set_shell_config(app: AppHandle, patch: ShellConfigPatch) -> Result<ShellConfig, String> {
     let state: Arc<AppState> = app.state::<Arc<AppState>>().inner().clone();
-    let runtime_mode_patched = patch.runtime_mode.is_some();
     let mut config = state.config.lock().unwrap().clone();
     if let Some(value) = patch.minimize_to_tray {
         config.minimize_to_tray = value;
@@ -163,22 +147,11 @@ pub fn set_shell_config(app: AppHandle, patch: ShellConfigPatch) -> Result<Shell
             return Err("engineHome 必须是字符串或 null".to_string());
         };
     }
-    if let Some(value) = patch.runtime_mode {
-        config.runtime_mode = value;
-    }
-    if let Some(value) = patch.runtime_mode_selected {
-        config.runtime_mode_selected = value;
-    }
     crate::app::config::save(&config, &state.config_path)?;
     *state.config.lock().unwrap() = config.clone();
     state
         .logger
         .info(&format!("shell config updated: {config:?}"));
-    // Keep the tray 运行时 checkmarks in sync with the persisted mode (the
-    // first-run dialog also writes through here, before any restart).
-    if runtime_mode_patched {
-        crate::ui::tray::sync_runtime_checks(&state);
-    }
     Ok(config)
 }
 
@@ -192,29 +165,8 @@ pub fn restart_engine(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Start the environment detection / engine bootstrap. The frontend triggers
-/// this only after the one-time runtime choice has been made (or immediately
-/// on later runs when that choice already exists), so the runtime mode is
-/// settled before detection begins.
-#[tauri::command]
-pub fn begin_bootstrap(app: AppHandle) {
-    let state: Arc<AppState> = app.state::<Arc<AppState>>().inner().clone();
-    if state
-        .bootstrap_started
-        .swap(true, std::sync::atomic::Ordering::SeqCst)
-    {
-        return;
-    }
-    crate::engine::bootstrap::startup(app, state);
-}
-
 fn open_path(path: &Path) -> Result<(), String> {
-    #[cfg(target_os = "windows")]
-    let command = "explorer.exe";
-    #[cfg(target_os = "macos")]
-    let command = "open";
-    #[cfg(target_os = "linux")]
-    let command = "xdg-open";
+    let command = crate::core::platform::reveal_command();
     Command::new(command)
         .arg(path)
         .spawn()
@@ -256,7 +208,7 @@ pub fn get_theme_state(app: AppHandle) -> theme::ThemeState {
 pub fn set_ui_theme(app: AppHandle, mode: String) -> Result<theme::ThemeState, String> {
     let state: Arc<AppState> = app.state::<Arc<AppState>>().inner().clone();
     let next = theme::set_ui_theme(&app, &state, mode)?;
-    // The theme can also be changed from the boot screen; keep the tray
+    // The theme can also be changed from the setup screen; keep the tray
     // 外观 checkmarks in sync.
     crate::ui::tray::sync_theme_checks(&state);
     Ok(next)

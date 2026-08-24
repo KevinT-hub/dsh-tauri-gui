@@ -70,7 +70,7 @@ pub async fn check_update() -> Result<AppUpdateInfo, String> {
 }
 
 async fn fetch_latest_json(endpoint: &str) -> Result<LatestJson, String> {
-    let agent = netprobe::http_agent(Some(Duration::from_secs(30)));
+    let agent = crate::core::http::http_agent(Some(Duration::from_secs(30)));
     let mut resp = agent
         .get(endpoint)
         .header("User-Agent", "dsh-tauri-gui")

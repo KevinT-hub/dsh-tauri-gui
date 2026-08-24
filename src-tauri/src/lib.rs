@@ -1,7 +1,9 @@
 mod app;
 mod commands;
 mod core;
+mod detection;
 mod engine;
+mod geo;
 mod ui;
 mod update;
 
@@ -9,7 +11,7 @@ use app::AppState;
 use core::logging::Logger;
 use std::sync::Arc;
 use std::time::Duration;
-use tauri::{Emitter, Manager};
+use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -17,12 +19,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.show();
-                let _ = window.unminimize();
-                let _ = window.set_focus();
-            }
-            ui::windows::sync_update_overlay(app);
+            app::lifecycle::show_main(app);
         }))
         .plugin(tauri_plugin_updater::Builder::new().build())
         .on_page_load(|webview, _payload| {
@@ -41,7 +38,7 @@ pub fn run() {
                 return;
             };
             if engine::is_shell_url(&url) {
-                // Shell page (boot checklist / splash): show only when the
+                // Shell page (setup checklist / splash): show only when the
                 // version-gated checklist is active; otherwise stay hidden
                 // until the Web UI is ready.
                 let checklist = app::config::checklist_required_full(&state);
@@ -89,10 +86,11 @@ pub fn run() {
             ui::theme::spawn_theme_watcher(app.handle().clone(), state.clone());
             ui::theme::sync_window_theme(app.handle(), &state);
 
-            // Detection/engine bootstrap is deferred until the frontend has
-            // settled the runtime mode (see the `begin_bootstrap` command),
-            // so the one-time runtime choice can be made *before* detection.
+            // Detection is deferred until the frontend has painted the shell
+            // page (see the `shell_ready` / `begin_setup` commands), so the
+            // version-gated setup screen can show before probing starts.
             schedule_app_update_check(app.handle().clone(), state);
+            schedule_dsh_update_check(app.handle().clone(), app.state::<Arc<AppState>>().inner().clone());
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -123,8 +121,6 @@ pub fn run() {
             commands::shell::get_diagnostics,
             commands::shell::checklist_state,
             commands::shell::shell_ready,
-            commands::shell::enter_harness,
-            commands::shell::begin_bootstrap,
             commands::shell::restart_engine,
             commands::shell::open_logs_dir,
             commands::shell::open_web_ui,
@@ -132,8 +128,14 @@ pub fn run() {
             commands::shell::get_theme_state,
             commands::shell::set_ui_theme,
             commands::shell::hide_update_overlay,
-            commands::runtime::check_runtime_update,
-            commands::runtime::apply_runtime_update,
+            commands::setup_flow::run_detection_v2,
+            commands::setup::mark_setup_seen,
+            commands::setup_flow::install_dependency_v2,
+            commands::setup::enter_harness,
+            commands::setup_flow::recheck_environment_v2,
+            commands::setup_flow::begin_setup_v2,
+            commands::dsh_update::install_dsh_update,
+            commands::geo::get_geo_state,
             commands::updater::check_app_update,
             commands::updater::apply_app_update,
         ])
@@ -142,7 +144,7 @@ pub fn run() {
         .run(|app_handle, event| {
             if let tauri::RunEvent::ExitRequested { .. } = event {
                 let state = app_handle.state::<Arc<AppState>>();
-                engine::stop_engine(&state);
+                app::lifecycle::shutdown(&state);
                 app_handle.cleanup_before_exit();
             }
         });
@@ -153,22 +155,13 @@ pub fn run() {
 fn schedule_app_update_check(app: tauri::AppHandle, state: Arc<AppState>) {
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_secs(3));
-        let result = tauri::async_runtime::block_on(update::checker::check_update());
-        match result {
-            Ok(info) => {
-                state.logger.info(&format!(
-                    "app update check: available={} version={}",
-                    info.available, info.version
-                ));
-                *state.app_update.lock().unwrap() = Some(info.clone());
-                let _ = app.emit("shell://app-update", info);
-                ui::windows::sync_update_overlay(&app);
-            }
-            Err(err) => {
-                state
-                    .logger
-                    .warn(&format!("app update check failed: {err}"));
-            }
-        }
+        ui::tray::check_app_update_now(app, state);
+    });
+}
+
+fn schedule_dsh_update_check(app: tauri::AppHandle, state: Arc<AppState>) {
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_secs(4));
+        ui::tray::check_dsh_update_now(app, state);
     });
 }

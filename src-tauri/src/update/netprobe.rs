@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 /// Update source selection with GitHub-first probing and public mirrors.
 ///
 /// Mirrors are treated as untrusted download-only proxies: they only ever
@@ -68,14 +66,4 @@ pub fn installer_candidates(original_url: &str) -> Vec<String> {
             .map(|prefix| format!("{prefix}{original_url}")),
     );
     candidates
-}
-
-/// Build an HTTP agent with sane timeouts. A global timeout is only applied
-/// to small metadata requests; downloads set their own stall detection.
-pub fn http_agent(global_timeout: Option<Duration>) -> ureq::Agent {
-    let mut builder = ureq::Agent::config_builder().timeout_connect(Some(Duration::from_secs(10)));
-    if let Some(timeout) = global_timeout {
-        builder = builder.timeout_global(Some(timeout));
-    }
-    ureq::Agent::new_with_config(builder.build())
 }
