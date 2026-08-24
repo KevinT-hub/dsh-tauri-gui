@@ -881,19 +881,17 @@ dependencies = [
 
 [[package]]
 name = "dsh-tauri-gui"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
  "dirs",
- "flate2",
  "hex",
  "minisign-verify",
  "serde",
  "serde_json",
  "serde_yaml",
  "sha2",
- "tar",
  "tauri",
  "tauri-build",
  "tauri-plugin-opener",

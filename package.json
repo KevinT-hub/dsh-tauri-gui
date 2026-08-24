@@ -1,7 +1,7 @@
 {
   "name": "dsh-tauri-gui",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.2.0",
   "license": "MIT",
   "packageManager": "pnpm@11.7.0",
   "engines": {
@@ -14,9 +14,6 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "runtime:prepare": "node scripts/prepare-runtime.mjs --dev",
-    "runtime:package": "node scripts/prepare-runtime.mjs --package",
-    "runtime:smoke": "node scripts/smoke-runtime.mjs",
     "bundle:rename": "node scripts/rename-bundles.mjs",
     "version:check": "node scripts/release-version.mjs check-files",
     "version:set": "node scripts/version-set.mjs",
@@ -37,7 +34,6 @@
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^4.6.0",
     "tailwindcss": "^4.3.3",
-    "tar": "^7.4.3",
     "typescript": "~5.8.3",
     "vite": "^7.0.4"
   }
