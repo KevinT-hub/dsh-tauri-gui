@@ -15,11 +15,9 @@ permissions:
   contents: read
 
 # GitHub-hosted runners run outside mainland China. Keep CI on the official
-# upstream endpoints; the local-development defaults remain in prepare-runtime.
+# upstream endpoints; the shell's runtime detection is entirely local.
 env:
   NPM_CONFIG_REGISTRY: https://registry.npmjs.org
-  DSH_TAURI_NPM_REGISTRY: https://registry.npmjs.org
-  DSH_TAURI_NODE_MIRROR: https://nodejs.org/dist
 
 # Keep only the newest run per branch/PR; release workflows are separate and
 # unaffected by this group.
@@ -82,13 +80,6 @@ jobs:
           pnpm install --frozen-lockfile --registry=https://registry.npmjs.org
           pnpm run build
 
-      # Explicit compile-only placeholders (marked testMode) so `cargo check`
-      # can run without a real runtime. The release workflow always replaces
-      # them with `runtime:package` output and asserts no testMode marker
-      # reaches the installers.
-      - name: Create compile-only resource placeholders
-        run: node scripts/prepare-runtime.mjs --test-resource
-
       - name: Cargo fmt
         working-directory: src-tauri
         run: cargo fmt --check
@@ -101,72 +92,13 @@ jobs:
         working-directory: src-tauri
         run: cargo check
 
+      # Unit tests cover: environment detection gates, version parsing,
+      # Windows command-extension resolution, geo country-code normalization,
+      # geo consensus/cache and source selection (all fixture-driven, no
+      # real PATH / dsh home / network dependency).
       - name: Cargo test
         working-directory: src-tauri
         run: cargo test --lib
-
-  runtime-smoke:
-    name: Runtime prune + end-to-end smoke
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11.7.0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile --registry=https://registry.npmjs.org
-
-      # Building @deepseek-ai/dsh pulls hundreds of npm packages and is the
-      # dominant cost of this job. Cache the finished, platform-specific
-      # bundle; the smoke tests below still validate both the unpacked runtime
-      # and the exact archive shipped by the installer.
-      - name: Restore prepared runtime bundle
-        id: runtime-bundle-cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            src-tauri/resources/runtime.tar.gz
-            src-tauri/resources/runtime.json
-          key: runtime-bundle-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/runtime-versions.json', 'scripts/prepare-runtime.mjs') }}
-
-      # Keep the package-manager and Node archive caches as a fallback for a
-      # cache miss or an intentional runtime-bundle key refresh.
-      - name: Cache runtime download inputs
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/dsh-tauri-gui
-            ~/.npm
-          key: runtime-inputs-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/runtime-versions.json', 'scripts/prepare-runtime.mjs') }}
-          restore-keys: |
-            runtime-inputs-v1-${{ runner.os }}-${{ runner.arch }}-
-
-      - name: Prepare pruned runtime bundle
-        if: steps.runtime-bundle-cache.outputs.cache-hit != 'true'
-        run: node scripts/prepare-runtime.mjs --package --target "$RUNNER_TEMP/dsh-runtime" --keep
-
-      - name: Unpack cached runtime bundle
-        if: steps.runtime-bundle-cache.outputs.cache-hit == 'true'
-        run: |
-          set -euo pipefail
-          rm -rf "$RUNNER_TEMP/dsh-runtime"
-          mkdir -p "$RUNNER_TEMP/dsh-runtime"
-          tar -xzf src-tauri/resources/runtime.tar.gz -C "$RUNNER_TEMP/dsh-runtime"
-
-      - name: Smoke test the pruned runtime
-        run: node scripts/smoke-runtime.mjs --runtime "$RUNNER_TEMP/dsh-runtime"
-        env:
-          CI: "true"
-
-      # Directly unpack and verify the final tar.gz the installer ships, so an
-      # empty or truncated archive can never slip through.
-      - name: Smoke test the packed archive
-        run: node scripts/smoke-runtime.mjs --archive "src-tauri/resources/runtime.tar.gz"
-        env:
-          CI: "true"
 
   # Dependency audit. Explicitly non-blocking (continue-on-error) so an
   # advisory never blocks a merge by itself; alerts stay visible in logs.

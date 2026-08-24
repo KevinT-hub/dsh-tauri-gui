@@ -30,11 +30,10 @@ env:
   CARGO_INCREMENTAL: 0
   RUST_BACKTRACE: short
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  # GitHub-hosted runners run outside mainland China. Use upstream sources for
-  # both the npm packages and the Node archive; local defaults stay mirror-first.
+  # GitHub-hosted runners run outside mainland China. Use upstream sources
+  # for npm packages; the shell never bundles a Node runtime, so no Node
+  # archive mirror is needed here.
   NPM_CONFIG_REGISTRY: https://registry.npmjs.org
-  DSH_TAURI_NPM_REGISTRY: https://registry.npmjs.org
-  DSH_TAURI_NODE_MIRROR: https://nodejs.org/dist
 
 concurrency:
   group: release-${{ github.ref }}
@@ -201,39 +200,12 @@ jobs:
   # ---------------------------------------------------------------------
   # 3. build: platform matrix. Every platform builds the exact tag commit
   #    with the pinned Rust toolchain and produces a bundle-manifest.json.
+  #    No runtime is bundled: the installer ships the shell only, and the
+  #    setup screen detects the user's external Node/npm/pnpm/dsh.
   # ---------------------------------------------------------------------
-  resolve-runtime:
-    name: Resolve latest runtime versions
-    runs-on: ubuntu-latest
-    outputs:
-      node_version: ${{ steps.resolve.outputs.node_version }}
-      dsh_version: ${{ steps.resolve.outputs.dsh_version }}
-    steps:
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Resolve latest LTS Node and dsh versions
-        id: resolve
-        shell: bash
-        run: |
-          set -euo pipefail
-          NODE_VERSION=$(node --input-type=module -e '
-            const releases = await (await fetch("https://nodejs.org/dist/index.json")).json();
-            const latest = releases.find((release) => release.lts && /^v\d+\.\d+\.\d+$/.test(release.version));
-            if (!latest) throw new Error("no latest LTS Node release found");
-            process.stdout.write(latest.version.slice(1));
-          ')
-          DSH_VERSION=$(npm view @deepseek-ai/dsh dist-tags.latest --json --registry=https://registry.npmjs.org | tr -d '"')
-          [[ "$NODE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::invalid Node version: $NODE_VERSION"; exit 1; }
-          [[ "$DSH_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || { echo "::error::invalid dsh version: $DSH_VERSION"; exit 1; }
-          echo "node_version=$NODE_VERSION" >> "$GITHUB_OUTPUT"
-          echo "dsh_version=$DSH_VERSION" >> "$GITHUB_OUTPUT"
-          echo "::notice::runtime Node $NODE_VERSION; @deepseek-ai/dsh $DSH_VERSION"
-
   build:
     name: Build ${{ matrix.artifact }}
-    needs: [resolve-release, resolve-runtime]
+    needs: [resolve-release]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -296,22 +268,6 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile --registry=https://registry.npmjs.org
 
-      - name: Restore prepared runtime bundle
-        id: runtime-bundle-cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            src-tauri/resources/runtime.tar.gz
-            src-tauri/resources/runtime.json
-          key: runtime-bundle-v2-${{ runner.os }}-${{ runner.arch }}-node-${{ needs.resolve-runtime.outputs.node_version }}-dsh-${{ needs.resolve-runtime.outputs.dsh_version }}-${{ hashFiles('scripts/runtime-versions.json', 'scripts/prepare-runtime.mjs') }}
-
-      - name: Prepare self-contained dsh runtime
-        if: steps.runtime-bundle-cache.outputs.cache-hit != 'true'
-        run: pnpm run runtime:package
-        env:
-          DSH_TAURI_NODE_VERSION: ${{ needs.resolve-runtime.outputs.node_version }}
-          DSH_TAURI_DSH_VERSION: ${{ needs.resolve-runtime.outputs.dsh_version }}
-
       - name: Validate updater signing secrets
         shell: bash
         env:
@@ -323,24 +279,25 @@ jobs:
           [[ -n "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}" ]] || { echo "::error::TAURI_SIGNING_PRIVATE_KEY_PASSWORD is not configured"; exit 1; }
           echo "Updater signing secrets are present; Tauri will validate the key and password during signing."
 
-      # Guards against compile-only placeholders (from --test-resource) ever
-      # reaching a release build.
-      - name: Assert runtime resources are real
+      # Reverse assertion: the installer must NOT carry any runtime resources
+      # (no bundled Node, no runtime archives, no runtime manifests).
+      - name: Assert no runtime resources are declared
         shell: bash
         run: |
           set -euo pipefail
-          node -e "
-            const fs = require('fs');
-            const m = JSON.parse(fs.readFileSync('src-tauri/resources/runtime.json', 'utf8'));
-            if (m.testMode) {
-              throw new Error('compile-only placeholder leaked into release build');
-            }
-            const st = fs.statSync('src-tauri/resources/runtime.tar.gz');
-            if (st.size < 1024 * 1024) {
-              throw new Error('runtime.tar.gz looks like a placeholder (' + st.size + ' bytes)');
-            }
-            console.log('runtime resources OK (' + st.size + ' bytes)');
-          "
+          # resources/ must not contain any runtime payload.
+          if [ -d src-tauri/resources ] && find src-tauri/resources -type f | grep -qiE 'runtime|node|pnpm|dsh'; then
+            echo "::error::src-tauri/resources contains runtime payload"
+            find src-tauri/resources -type f
+            exit 1
+          fi
+          # tauri.conf.json must not declare runtime resources.
+          RESOURCES=$(node -e "const c=JSON.parse(require('fs').readFileSync('src-tauri/tauri.conf.json','utf8')); console.log((c.bundle.resources||[]).join(' '))")
+          if echo "$RESOURCES" | grep -qiE 'runtime|node|pnpm|dsh'; then
+            echo "::error::tauri.conf.json declares runtime resources: $RESOURCES"
+            exit 1
+          fi
+          echo "No runtime resources declared in source or config."
 
       - name: Build Tauri bundles (with updater signatures)
         run: pnpm exec tauri build --target ${{ matrix.target }}
@@ -391,6 +348,19 @@ jobs:
             }
             console.log('manifest OK: ' + m.files.length + ' artifact(s) for v' + m.version);
           " "$MANIFEST" "${{ needs.resolve-release.outputs.version }}"
+
+      - name: Assert bundles contain no runtime payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUNDLE="src-tauri/target/${{ matrix.target }}/release/bundle"
+          LEAKS=$(find "$BUNDLE" -type f \( -name 'runtime.tar.gz' -o -name 'runtime.json' -o -name 'node.exe' -o -path '*/runtime/*' -o -name 'dsh.cmd' -o -name 'pnpm*' \) 2>/dev/null || true)
+          if [ -n "$LEAKS" ]; then
+            echo "::error::runtime payload leaked into the bundle:"
+            echo "$LEAKS"
+            exit 1
+          fi
+          echo "Bundle clean: no runtime.tar.gz / runtime.json / bundled Node / dsh runtime."
 
       - name: Upload bundles
         uses: actions/upload-artifact@v4

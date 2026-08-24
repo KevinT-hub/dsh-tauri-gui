@@ -26,8 +26,10 @@ dist-ssr
 # Official DeepSeek-Harness source tree (reference only, never shipped)
 /deepseek-harness/
 
-# Generated Tauri bundle resources (runtime archive prepared by scripts)
-/src-tauri/resources/
+# The shell never bundles a runtime: never commit runtime payloads.
+# (Keep the directory itself trackable for future static resources.)
+/src-tauri/resources/runtime.*
+/src-tauri/resources/runtime/
 
 # Local Tauri signing keypair (release uses repository secrets instead)
 /src-tauri/.tauri-signing.key

@@ -1,4 +1,4 @@
-<h1 align="center">DeepSeek Harness Tauri Desktop</h1>
+<h1 align="center">dsh-tauri-gui</h1>
 
 <p align="center">
   <a href="https://github.com/KevinT-hub/dsh-tauri-gui/actions/workflows/release.yml"><img alt="Release Build" src="https://github.com/KevinT-hub/dsh-tauri-gui/actions/workflows/release.yml/badge.svg"></a>
@@ -11,78 +11,82 @@
   <a href="README.md">中文</a> · <strong>English</strong>
 </p>
 
-> A **Tauri v2** desktop client for DeepSeek Harness. Ships a self-contained runtime and runs out of the box — it hosts the official DeepSeek Harness local Web UI, Host service, and plugin system inside a native desktop window.
+> A **Tauri v2** desktop client for DeepSeek Harness. The installer **does not bundle any runtime**: the shell detects and reuses your locally installed **Node.js / npm / pnpm / dsh**, then hosts the official DeepSeek Harness Web UI, Host service and plugin system in a native desktop window.
 >
-> A community-maintained open-source project, **not an official DeepSeek product**.
+> Community-maintained open source — **not an official DeepSeek product**.
 
 ---
 
-## What is it
+## What it is
 
-[DeepSeek Harness (dsh)](https://github.com/deepseek-ai/deepseek-harness) is DeepSeek's official agent runtime: it ships a Web UI, a Host service, and a pluggable plugin system. Officially you run it in the browser via `npx @deepseek-ai/dsh web`.
+[DeepSeek Harness (dsh)](https://github.com/deepseek-ai/deepseek-harness) is DeepSeek's official agent framework with a built-in Web UI, Host service and a pluggable plugin system. By default it runs in the browser via `npx @deepseek-ai/dsh web`.
 
-This project is a **native desktop shell**: it runs the official dsh at a pinned version exactly as-is, and only owns the window, system tray, auto-update, runtime management, and desktop configuration. It launches the official `dsh web` command and hosts its Web UI inside a Tauri window.
+This project is a **native desktop shell**: it detects and reuses the Node.js and the official `@deepseek-ai/dsh` CLI already installed on your machine. The shell owns environment detection, install help, window lifecycle, process management, app updates and the desktop experience; the official `dsh web` command powers the Web UI inside a Tauri window.
 
-- It does **not** modify or fork the upstream dsh source.
-- It does **not** hack the dsh plugin mechanism.
-- All agents, models, tools, sessions, and the Web UI come from the official `@deepseek-ai/dsh`.
+- No forks or modifications of the upstream dsh source;
+- No copying or re-implementing of the dsh plugin mechanism;
+- Agents, models, tools, sessions and the Web UI all come from the official `@deepseek-ai/dsh`.
 
-> In one sentence: **this project = "native desktop shell" + "official dsh"**. The shell owns the experience; dsh owns the capability.
+> In one line: **this project = a native desktop shell + the official dsh**. The shell handles the experience; dsh handles the capabilities.
 
-## Key features
+## Requirements
 
-- **Self-contained runtime**: bundles Node.js + pnpm + `@deepseek-ai/dsh`, so no separate Node / npm / dsh install is required (bundled runtime mode).
-- **Two runtime modes**: `bundled` (recommended — pinned, stable) and `system` (reuses node / npm / dsh from PATH, for advanced users who manage their own environment). Chosen once on first launch, switchable anytime from the tray.
-- **Official Web UI, native**: launches `dsh web` and renders it in the Tauri window — same experience as the browser. If a dsh instance is already serving the port, it connects instead of spawning a second one.
-- **System tray & single-instance**: double-click the tray icon to raise the window; a second launch focuses the existing window instead of starting a new process.
-- **App auto-update**: distributed via GitHub Releases + mirror sources, verified with **minisign signatures and SHA-256**. The update button only appears when a new version exists.
-- **dsh core hot-update**: in bundled mode you can upgrade `@deepseek-ai/dsh` to the latest version in one click, using a "staged install + backup rollback" scheme so a failed update never corrupts the existing environment.
-- **First-run guidance & checklist**: shown only on the first launch of a new version, so daily use is never interrupted.
-- **Appearance themes**: light / dark / system, synced live with the OS.
-- **Crash auto-restart**: the engine restarts automatically after an unexpected exit (can be disabled).
-- **Privacy-first**: telemetry is off by default; logs are redacted for secrets; the Webview only loads the dsh address on local `127.0.0.1`.
+The shell does **not** bundle a runtime. On first launch it guides you through installing any missing external dependency:
 
-## Download & install
+| Dependency | Version | Notes |
+| --- | --- | --- |
+| **Node.js** | `^22.19.0` or `>=24` | Official dsh engine requirement |
+| **npm** or **pnpm** | any | At least one is required (the UI shows both rows) |
+| **dsh** | any | Official package `@deepseek-ai/dsh`, typically `npm install -g @deepseek-ai/dsh` |
 
-CI builds installers for every release tag across **Windows (x64 / ARM64)**, **macOS (Intel / Apple Silicon)**, and **Linux (x64)**.
+See [Installation](docs/INSTALLATION.md) and [User Guide](docs/USER_GUIDE.md) for details.
 
-1. Go to **[Releases](https://github.com/KevinT-hub/dsh-tauri-gui/releases)** and download the installer for your platform;
-2. Install and launch;
-3. On first launch you choose a runtime, after which the dsh Web UI opens automatically.
+## Features
 
-> No release yet? Build from source following [CONTRIBUTING.md](CONTRIBUTING.md).
+- **Environment detection**: Node / npm / pnpm / dsh probed in parallel, with path, version and error per row;
+- **Install help**: official install actions for missing dependencies (Node opens the official download page, dsh installs the official package) — every action requires explicit user confirmation;
+- **Mirror policy**: geo detection picks npmmirror inside mainland China and the official registry abroad; geo failure safely falls back to official sources with a manual mirror switch;
+- **One-time setup gate**: the detection screen shows once per app version; a failed detection never re-opens it, and the tray "re-detect environment" entry is always available;
+- **Official engine**: launched as `dsh web --no-open --port <port>`, preserving `DSH_HOME`, the telemetry switch, registry, working directory and plugin-directory semantics;
+- **Connect-or-spawn**: an existing official `dsh web` instance on the port is reused instead of spawning a second engine;
+- **Crash recovery**: the engine restarts automatically on abnormal exit; an occupied port falls back to an OS-assigned one;
+- **App auto-update**: GitHub-first with mirror fallback, verified by SHA-256 + minisign signatures, official GitHub Release sources only;
+- **System tray**: show window, open Web UI, re-detect environment, restart engine, check updates, appearance theme, quit.
 
 ## Quick start
 
-1. Launch the app; on first run choose **Bundled runtime (recommended)** in the "Select runtime" dialog;
-2. The app detects the environment and starts the dsh engine;
-3. Once the engine is ready, the Tauri window shows the official dsh Web UI — start chatting;
-4. Use the **system tray** menu for: show main window, open Web UI, restart engine, check for updates, switch appearance / runtime, and quit.
+```sh
+# Prerequisite: Node.js 22.19+ / 24+ and the official @deepseek-ai/dsh on your machine
+npm install -g @deepseek-ai/dsh
 
-## Documentation
+# Install dependencies and run (development)
+pnpm install
+pnpm tauri dev
+```
 
-| Topic | Description |
-| --- | --- |
-| [Architecture](docs/ARCHITECTURE.md) | Shell/dsh boundary, runtime, boot flow, security model, update channels |
-| [User guide](docs/USER_GUIDE.md) | Install, first launch, daily use, core hot-update, data & directories |
-| [FAQ](docs/FAQ.md) | Launch failures, port conflicts, runtime switching, updates & privacy |
-| [Contributing](CONTRIBUTING.md) | Local dev environment, build, release flow, code conventions |
+Release builds are downloaded from [Releases](https://github.com/KevinT-hub/dsh-tauri-gui/releases); follow the setup screen on first launch.
 
-## Relationship to the official project
+## Repository layout
 
-This project is built on [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) and reuses its official `dsh web` capability and plugin ecosystem. We make **no modifications** to upstream — the official dsh runs at a pinned version, and the desktop shell only composes with it via official commands.
+```text
+src/            React shell UI (app / features / shared / ui)
+src-tauri/      Rust/Tauri native shell (app / commands / core / detection / engine / geo / ui / update)
+scripts/        version, release and artifact tooling
+tests/          Node scripts, release tooling and cross-layer contract tests
+docs/           user docs, architecture, installation and release notes
+.github/        CI / Release / updater-channel workflows
+```
 
-- If you want to run dsh from the **command line**, or contribute to **core features**, prefer the official repository.
-- If you want a **native desktop experience** (window, tray, update, zero-setup), this project fits better.
+## Docs
+
+- [Installation](docs/INSTALLATION.md)
+- [User Guide](docs/USER_GUIDE.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [FAQ](docs/FAQ.md)
+- [Plugin Compatibility](docs/PLUGIN_COMPATIBILITY.md)
+- [Release & Update Channel](docs/RELEASE.md)
+- [Contributing](CONTRIBUTING.md)
 
 ## Disclaimer
 
-> This project is a community desktop build based on DeepSeek Harness. It is **not an official DeepSeek product**, has no affiliation with DeepSeek, and is not endorsed by them.
->
-> This project is fully open-source and free. If anyone tries to sell you this software in any form, please refuse.
->
-> DeepSeek is a trademark of DeepSeek AI. DSH Tauri Desktop is an independent community project.
-
-## License
-
-[MIT](LICENSE) © 2026 KevinT-hub
+This is a **community-maintained open-source project, not an official DeepSeek product**. We do not modify the upstream `@deepseek-ai/dsh`; we only combine it through the official `dsh web` command. Use under [LICENSE](LICENSE).

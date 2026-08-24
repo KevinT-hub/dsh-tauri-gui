@@ -1,4 +1,4 @@
-<h1 align="center">DeepSeek Harness Tauri Desktop</h1>
+<h1 align="center">dsh-tauri-gui</h1>
 
 <p align="center">
   <a href="https://github.com/KevinT-hub/dsh-tauri-gui/actions/workflows/release.yml"><img alt="Release Build" src="https://github.com/KevinT-hub/dsh-tauri-gui/actions/workflows/release.yml/badge.svg"></a>
@@ -11,7 +11,7 @@
   <strong>中文</strong> · <a href="README_EN.md">English</a>
 </p>
 
-> 基于 **Tauri v2** 的 DeepSeek Harness 桌面客户端。内置自包含运行时，开箱即用；把官方 DeepSeek Harness 的本地 Web UI、Host 服务与插件系统装进原生桌面窗口。
+> 基于 **Tauri v2** 的 DeepSeek Harness 桌面客户端。安装包**不内置任何运行时**：桌面壳检测并使用你本机已安装的 **Node.js / npm / pnpm / dsh**，把官方 DeepSeek Harness 的本地 Web UI、Host 服务与插件系统装进原生桌面窗口。
 >
 > 社区维护的开源项目，**并非 DeepSeek 官方产品**。
 
@@ -21,68 +21,72 @@
 
 [DeepSeek Harness（dsh）](https://github.com/deepseek-ai/deepseek-harness) 是 DeepSeek 官方的智能体运行框架，自带 Web UI、Host 服务与可插拔的插件系统。官方默认通过 `npx @deepseek-ai/dsh web` 在浏览器中运行。
 
-本项目是一个 **原生桌面壳**：它把官方 dsh 以固定版本原样运行，自己只负责窗口、系统托盘、自动更新、运行时管理与桌面工作配置，并通过官方 `dsh web` 命令把 Web UI 承载在 Tauri 窗口里。
+本项目是一个 **原生桌面壳**：它检测并复用你机器上已有的 Node.js 与官方 `@deepseek-ai/dsh` CLI，自己只负责环境检测、安装帮助、窗口生命周期、进程管理、自动更新与桌面体验，并通过官方 `dsh web` 命令把 Web UI 承载在 Tauri 窗口里。
 
 - 不修改、不 fork 上游 dsh 源码；
-- 不魔改 dsh 的插件机制；
+- 不复制或替换 dsh 的插件机制；
 - 核心的智能体、模型、工具、会话与 Web UI 全部来自官方 `@deepseek-ai/dsh`。
 
 > 一句话总结：**本项目 = 「原生桌面壳」+「官方 dsh」**。壳负责体验，dsh 负责能力。
 
-## 主要功能
+## 环境要求
 
-- **自包含运行时**：内置 Node.js + pnpm + `@deepseek-ai/dsh`，用户无需自行安装 Node / npm / dsh 即可使用（内置运行时模式）。
-- **双运行时模式**：`内置运行时`（推荐，版本固定、稳定）与 `系统运行时`（复用 PATH 中的 node / npm / dsh，适合自行管理环境的进阶用户）。首次启动选择一次，之后可随时从托盘切换。
-- **官方 Web UI 原生承载**：启动 `dsh web` 并渲染在 Tauri 窗口中，体验与浏览器一致；若端口上已有运行的 dsh 实例则直接连接，不会重复拉起。
-- **系统托盘与单例**：双击托盘图标唤起窗口；重复打开时聚焦已有窗口而非再起一个进程。
-- **应用自动更新**：通过 GitHub Releases + 镜像源分发，使用 **minisign 签名 + SHA-256 双重校验**；仅在有新版本时显示更新按钮。
-- **dsh 核心热更新**：在内置运行时下可一键把 `@deepseek-ai/dsh` 升级到最新版本，采用「暂存安装 + 备份回滚」确保中途失败不破坏现有环境。
-- **首次引导与检查清单**：仅在新版本首次启动时展示检测 / 许可清单，避免每次打开都打扰。
-- **外观主题**：亮色 / 暗色 / 跟随系统，与操作系统实时同步。
-- **崩溃自重启**：引擎异常退出后自动重启（可关闭）。
-- **隐私优先**：遥测默认关闭；所有日志对密钥做脱敏；Webview 仅允许加载本机 `127.0.0.1` 上的 dsh 地址。
+桌面壳**不打包运行时**，首次启动会引导你安装缺失的外部依赖：
 
-## 下载与安装
+| 依赖 | 版本要求 | 说明 |
+| --- | --- | --- |
+| **Node.js** | `^22.19.0` 或 `>=24` | 官方 dsh 的引擎要求 |
+| **npm** 或 **pnpm** | 任意可用版本 | 至少一个即可（UI 分别展示检测结果） |
+| **dsh** | 任意可用版本 | 官方包 `@deepseek-ai/dsh`，通常 `npm install -g @deepseek-ai/dsh` |
 
-当前由 CI 为每个发布标签构建 **Windows（x64 / ARM64）**、**macOS（Intel / Apple Silicon）** 与 **Linux（x64）** 安装包。
+安装完成后，首次启动的检测页会引导你完成剩余步骤；之后每次启动直接进入 Web UI。详见 [安装说明](docs/INSTALLATION.md) 与 [使用指南](docs/USER_GUIDE.md)。
 
-1. 前往 **[Releases](https://github.com/KevinT-hub/dsh-tauri-gui/releases)** 下载对应平台的安装包；
-2. 安装并启动；
-3. 首次启动会让你选择运行时，之后自动打开 dsh Web UI。
+## 特性
 
-> 还没有发布版本？请参考 [CONTRIBUTING.md](CONTRIBUTING.md) 从源码构建。
+- **环境检测**：Node / npm / pnpm / dsh 四项并行探测，逐项展示路径、版本与错误原因；
+- **安装帮助**：缺失依赖时给出官方安装动作（Node 打开官方下载页、dsh 执行官方包安装），所有安装动作均需用户确认；
+- **镜像策略**：geo 检测国内自动使用 npmmirror 镜像，境外使用官方源，geo 失败时安全回退官方源并允许手动切换；
+- **首次启动门禁**：每个应用版本只显示一次检测页，检测失败也不会反复打扰，托盘「重新检测环境」随时可手动触发；
+- **官方引擎**：以 `dsh web --no-open --port <port>` 启动，保留 `DSH_HOME`、遥测开关、registry、工作目录与插件目录语义；
+- **连接或拉起**：端口上已有官方 `dsh web` 实例时直接连接，避免配置/会话分散；
+- **崩溃自重启**：引擎异常退出后自动重启，端口被占用时自动回退系统分配端口；
+- **应用自动更新**：GitHub 优先 + 镜像回退，SHA-256 与 minisign 签名双重校验，仅官方 Release 来源；
+- **系统托盘**：显示窗口、打开 Web UI、重新检测环境、重启引擎、检查更新、外观主题、退出。
 
 ## 快速开始
 
-1. 启动应用，首次在「选择运行时」中选择 **内置运行时（推荐）**；
-2. 应用自动检测环境并启动 dsh 引擎；
-3. 引擎就绪后，Tauri 窗口会直接呈现官方 dsh Web UI，开始对话即可；
-4. 日常可通过 **系统托盘** 菜单进行：显示主窗口、打开 Web UI、重启引擎、检查更新、切换外观与运行时、退出。
+```sh
+# 前置：本机已安装 Node.js 22.19+ / 24+，以及官方 @deepseek-ai/dsh
+npm install -g @deepseek-ai/dsh
+
+# 安装依赖并启动（开发模式）
+pnpm install
+pnpm tauri dev
+```
+
+发布版从 [Releases](https://github.com/KevinT-hub/dsh-tauri-gui/releases) 下载安装包，首次启动按检测页指引即可。
+
+## 仓库结构
+
+```text
+src/            React 壳层 UI（app / features / shared / ui）
+src-tauri/      Rust/Tauri 原生壳层（app / commands / core / detection / engine / geo / ui / update）
+scripts/        版本、Release 与发行物处理脚本
+tests/          Node 脚本、Release 工具与跨层契约测试
+docs/           用户文档、架构文档、安装与发布说明
+.github/        CI / Release / updater channel 工作流
+```
 
 ## 文档
 
-| 主题 | 说明 |
-| --- | --- |
-| [架构说明](docs/ARCHITECTURE.md) | 桌面壳与 dsh 的边界、运行时、启动流程、安全模型、更新通道 |
-| [使用指南](docs/USER_GUIDE.md) | 安装、首次启动、日常使用、核心热更新、数据与目录 |
-| [常见问题](docs/FAQ.md) | 启动失败、端口占用、切换运行时、更新与隐私等排查 |
-| [贡献与开发](CONTRIBUTING.md) | 本地开发环境、构建、发布流程与代码约定 |
-
-## 与官方项目的关系
-
-本项目基于 [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) 构建，并复用其官方 `dsh web` 能力与插件生态。我们对上游 **不做任何修改** —— 官方 dsh 以固定版本原样运行，桌面壳仅通过官方命令与之组合。
-
-- 若你的目标是 **命令行** 运行 dsh，或参与 **核心功能** 开发，请优先查看官方仓库。
-- 若你的目标是 **原生桌面体验**（窗口、托盘、更新、免装环境），本项目更合适。
+- [安装说明](docs/INSTALLATION.md)
+- [使用指南](docs/USER_GUIDE.md)
+- [架构说明](docs/ARCHITECTURE.md)
+- [常见问题](docs/FAQ.md)
+- [插件兼容性](docs/PLUGIN_COMPATIBILITY.md)
+- [发布与更新通道](docs/RELEASE.md)
+- [贡献与开发](CONTRIBUTING.md)
 
 ## 免责声明
 
-> 本项目是基于 DeepSeek Harness 构建的社区桌面版本，**并非 DeepSeek 官方产品**，与 DeepSeek 官方没有隶属关系，也未获得其背书。
->
-> 本项目完全开源免费。如有人以任何形式向你出售本软件，请拒绝交易。
->
-> DeepSeek 是 DeepSeek AI 的商标。DSH Tauri Desktop 是独立的社区项目。
-
-## License
-
-[MIT](LICENSE) © 2026 KevinT-hub
+这是**社区维护的开源项目，并非 DeepSeek 官方产品**。我们不对上游 `@deepseek-ai/dsh` 做任何修改，仅通过官方 `dsh web` 命令与之组合。请遵循 [LICENSE](LICENSE) 使用本项目。

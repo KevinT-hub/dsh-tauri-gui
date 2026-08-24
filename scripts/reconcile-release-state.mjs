@@ -179,7 +179,7 @@ function cmdEnsureDraft(args) {
   const tag = requireArg(args, "--tag");
   const parsed = parseVersion(tag);
   const prerelease = parseBool(argValue(args, "--prerelease"), "--prerelease") ?? false;
-  const title = argValue(args, "--title") || `DeepSeek Harness Tauri Desktop ${parsed.tag}`;
+  const title = argValue(args, "--title") || `dsh-tauri-gui ${parsed.tag}`;
   const notes = argValue(args, "--notes");
   const notesFile = argValue(args, "--notes-file");
   const target = argValue(args, "--target");
