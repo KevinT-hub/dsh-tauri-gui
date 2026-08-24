@@ -1,0 +1,22 @@
+{
+  "node": {
+    "windows": "v22.19.0\r\n",
+    "macos": "v22.19.0\n",
+    "linux": "v24.1.2\n",
+    "old": "v20.11.1\n",
+    "broken": "node: bad option: --version\n"
+  },
+  "npm": {
+    "windows": "11.7.0\r\n",
+    "linux": "11.7.0\n"
+  },
+  "pnpm": {
+    "windows": "10.12.0\r\n",
+    "linux": "10.12.0\n"
+  },
+  "dsh": {
+    "windows": "0.1.0-rc.6\r\n",
+    "linux": "0.1.0-rc.6\n",
+    "missing": "dsh: command not found\n"
+  }
+}

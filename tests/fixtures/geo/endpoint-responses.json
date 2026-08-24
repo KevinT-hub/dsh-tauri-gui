@@ -1,0 +1,18 @@
+{
+  "ipinfo": {
+    "cn": { "ip": "1.2.3.4", "country": "CN", "city": "Shanghai" },
+    "us": { "ip": "9.9.9.9", "country": "US", "city": "Seattle" },
+    "no-country": { "ip": "1.1.1.1", "city": "Unknown" },
+    "invalid-code": { "ip": "2.2.2.2", "country": "CHINA" }
+  },
+  "ipapi": {
+    "cn": { "ip": "1.2.3.4", "country_code": "CN", "country_name": "China" },
+    "us": { "ip": "9.9.9.9", "country_code": "US" },
+    "error": { "error": true, "reason": "rate limited" }
+  },
+  "country.is": {
+    "cn": "CN",
+    "us": "US",
+    "malformed": "<html>blocked</html>"
+  }
+}
