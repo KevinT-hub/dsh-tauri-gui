@@ -77,8 +77,15 @@ async fn run_detection_inner(app: AppHandle, state: Arc<AppState>) -> Result<Set
         crate::app::emit_log(
             &state,
             Some(&app),
-            if dependency.status == CheckStatus::Passed { "INFO" } else { "WARN" },
-            format!("[detect] {}: {status}{version}{path}", dependency.id.label()),
+            if dependency.status == CheckStatus::Passed {
+                "INFO"
+            } else {
+                "WARN"
+            },
+            format!(
+                "[detect] {}: {status}{version}{path}",
+                dependency.id.label()
+            ),
         );
     }
 
@@ -144,7 +151,10 @@ async fn run_detection_inner(app: AppHandle, state: Arc<AppState>) -> Result<Set
 }
 
 #[tauri::command]
-pub async fn install_dependency_v2(app: AppHandle, dependency: DependencyId) -> Result<SetupState, String> {
+pub async fn install_dependency_v2(
+    app: AppHandle,
+    dependency: DependencyId,
+) -> Result<SetupState, String> {
     let state: Arc<AppState> = app.state::<Arc<AppState>>().inner().clone();
     let region = resolve_region(&state);
     let policy = detection::resolve_sources(region.region);
@@ -218,7 +228,9 @@ pub fn recheck_environment_v2(app: AppHandle) {
                         "INFO",
                         "环境检测通过，启动引擎…".to_string(),
                     );
-                    if let Err(err) = crate::engine::connect_existing_or_spawn(&app_for_task, &state) {
+                    if let Err(err) =
+                        crate::engine::connect_existing_or_spawn(&app_for_task, &state)
+                    {
                         crate::app::set_status(
                             &state,
                             Some(&app_for_task),
@@ -244,7 +256,12 @@ pub fn recheck_environment_v2(app: AppHandle) {
                 }
             }
             Err(err) => {
-                crate::app::emit_log(&state, Some(&app_for_task), "ERROR", format!("环境检测失败: {err}"));
+                crate::app::emit_log(
+                    &state,
+                    Some(&app_for_task),
+                    "ERROR",
+                    format!("环境检测失败: {err}"),
+                );
             }
         }
     });

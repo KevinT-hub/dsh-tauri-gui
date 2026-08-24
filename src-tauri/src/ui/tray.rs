@@ -18,8 +18,13 @@ pub fn setup_tray(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     let restart = MenuItem::with_id(app, "restart", "重启引擎", true, None::<&str>)?;
     let recheck = MenuItem::with_id(app, "recheck", "重新检测环境", true, None::<&str>)?;
     let check_update = MenuItem::with_id(app, "check-update", "检查更新", true, None::<&str>)?;
-    let check_dsh_update =
-        MenuItem::with_id(app, "check-dsh-update", "检查 DeepSeek Harness 更新", true, None::<&str>)?;
+    let check_dsh_update = MenuItem::with_id(
+        app,
+        "check-dsh-update",
+        "检查 DeepSeek Harness 更新",
+        true,
+        None::<&str>,
+    )?;
     check_dsh_update.set_text("检查 dsh 更新")?;
     let theme_light = CheckMenuItem::with_id(
         app,
@@ -103,7 +108,6 @@ pub fn setup_tray(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
                 *state.last_detection.lock().unwrap() = None;
                 let _ = app.emit(crate::app::events::SETUP_REQUESTED_EVENT, ());
                 crate::ui::windows::show_main_window(app);
-                return;
             }
             "check-update" => {
                 let state: Arc<AppState> = app.state::<Arc<AppState>>().inner().clone();

@@ -90,7 +90,10 @@ pub fn run() {
             // page (see the `shell_ready` / `begin_setup` commands), so the
             // version-gated setup screen can show before probing starts.
             schedule_app_update_check(app.handle().clone(), state);
-            schedule_dsh_update_check(app.handle().clone(), app.state::<Arc<AppState>>().inner().clone());
+            schedule_dsh_update_check(
+                app.handle().clone(),
+                app.state::<Arc<AppState>>().inner().clone(),
+            );
             Ok(())
         })
         .on_window_event(|window, event| {

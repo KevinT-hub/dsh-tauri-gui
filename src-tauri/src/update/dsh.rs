@@ -1,6 +1,9 @@
 use crate::app::AppState;
 use crate::core::http::{http_agent, USER_AGENT};
-use crate::detection::{self, model::{CheckStatus, DependencyId}};
+use crate::detection::{
+    self,
+    model::{CheckStatus, DependencyId},
+};
 use serde::Deserialize;
 use std::time::Duration;
 
@@ -13,7 +16,8 @@ pub async fn check_update(state: &AppState) -> Result<crate::update::DshUpdateIn
     let registry = state.config.lock().unwrap().npm_registry.clone();
     let current_version = current_version(state).unwrap_or_default();
     let latest_version = fetch_latest_version(&registry).await?;
-    let available = !current_version.is_empty() && compare_versions(&latest_version, &current_version);
+    let available =
+        !current_version.is_empty() && compare_versions(&latest_version, &current_version);
     Ok(crate::update::DshUpdateInfo {
         available,
         current_version,
@@ -30,9 +34,10 @@ fn current_version(state: &AppState) -> Option<String> {
         }
     }
     if let Some(rows) = state.last_detection.lock().unwrap().clone() {
-        if let Some(item) = rows.iter().find(|item| {
-            item.id == DependencyId::Dsh && item.status == CheckStatus::Passed
-        }) {
+        if let Some(item) = rows
+            .iter()
+            .find(|item| item.id == DependencyId::Dsh && item.status == CheckStatus::Passed)
+        {
             if let Some(version) = &item.version {
                 if !version.trim().is_empty() {
                     return Some(version.clone());

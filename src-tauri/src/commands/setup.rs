@@ -209,7 +209,11 @@ fn pump_install_lines(
 pub fn enter_harness(app: AppHandle) -> Result<(), String> {
     let state: Arc<AppState> = app.state::<Arc<AppState>>().inner().clone();
     let app_version = env!("CARGO_PKG_VERSION").to_string();
-    let (previous_first_run_completed, previous_last_checklist_version, previous_setup_seen_version) = {
+    let (
+        previous_first_run_completed,
+        previous_last_checklist_version,
+        previous_setup_seen_version,
+    ) = {
         let config = state.config.lock().unwrap();
         (
             config.first_run_completed,
