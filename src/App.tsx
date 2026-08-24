@@ -1,22 +1,24 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import BootScreen from "./features/boot/BootScreen";
-import RuntimeChoiceDialog from "./features/boot/RuntimeChoiceDialog";
 import ErrorScreen from "./features/error/ErrorScreen";
+import SetupScreen from "./features/setup/SetupScreen";
 import MinimalSplash from "./features/splash/MinimalSplash";
 import UpdateOverlay from "./features/updater/UpdateOverlay";
+import DshUpdateDialog from "./features/updater/DshUpdateDialog";
 import {
-  beginBootstrap,
+  beginSetup,
   getChecklistState,
   getShellConfig,
   getShellStatus,
   notifyShellReady,
+  onDshUpdate,
+  onSetupRequested,
   onShellLog,
   onShellStatus,
 } from "./shared/bridge";
-import { useTheme } from "./shared/theme";
 import type {
   ChecklistState,
+  DshUpdateInfo,
   ShellConfig,
   ShellLogLine,
   ShellStatus,
@@ -57,25 +59,19 @@ function useShellState() {
 
 export default function App() {
   const { status, logs, config, setConfig } = useShellState();
-  const theme = useTheme();
   const logEndRef = useRef<HTMLDivElement | null>(null);
   const [windowLabel] = useState(() => getCurrentWindow().label);
   const [checklist, setChecklist] = useState<ChecklistState | null>(null);
-  const bootstrapRef = useRef(false);
-
-  // Begin the environment detection / engine bootstrap exactly once. The
-  // runtime mode must be settled first (see RuntimeChoiceDialog), so this is
-  // triggered either after the one-time choice or immediately on later runs.
-  const triggerBootstrap = useCallback(() => {
-    if (bootstrapRef.current) return;
-    bootstrapRef.current = true;
-    void beginBootstrap();
-  }, []);
+  const [dshUpdate, setDshUpdate] = useState<DshUpdateInfo | null>(null);
+  const [setupRevision, setSetupRevision] = useState(0);
+  const checklistResolved = useRef(false);
 
   useEffect(() => {
     let disposed = false;
     void getChecklistState().then((value) => {
-      if (!disposed) setChecklist(value);
+      if (!disposed && !checklistResolved.current) {
+        setChecklist(value);
+      }
     });
     return () => {
       disposed = true;
@@ -83,12 +79,50 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    // On runs where the runtime was already chosen, start detection as soon
-    // as the config is known. The first-run dialog triggers it itself.
-    if (config?.runtimeModeSelected) {
-      triggerBootstrap();
+    let disposed = false;
+    void onSetupRequested(() => {
+      if (disposed) return;
+      checklistResolved.current = true;
+      setSetupRevision((value) => value + 1);
+      setChecklist((current) => ({
+        required: true,
+        appVersion: current?.appVersion ?? "",
+      }));
+    });
+    return () => {
+      disposed = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let disposed = false;
+    void onDshUpdate((info) => {
+      if (!disposed && info.available) {
+        setDshUpdate(info);
+      }
+    });
+    return () => {
+      disposed = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (checklist === null || checklistResolved.current) {
+      return;
     }
-  }, [config, triggerBootstrap]);
+    checklistResolved.current = true;
+    if (!checklist.required) {
+      void beginSetup();
+    }
+  }, [checklist]);
+
+  const handleSetupEntered = useCallback(() => {
+    checklistResolved.current = true;
+    setChecklist((current) => ({
+      required: false,
+      appVersion: current?.appVersion ?? "",
+    }));
+  }, []);
 
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ block: "end" });
@@ -96,8 +130,6 @@ export default function App() {
 
   useEffect(() => {
     if (windowLabel === "update-overlay") return;
-    // Tell Rust the shell page has actually painted; only then may the
-    // checklist window be revealed (no black flash).
     const frame = window.requestAnimationFrame(() => {
       window.requestAnimationFrame(() => {
         void notifyShellReady();
@@ -110,34 +142,29 @@ export default function App() {
     return <UpdateOverlay />;
   }
 
+  let content: ReactNode;
   if (status.phase === "error") {
-    return <ErrorScreen status={status} />;
-  }
-
-  if (checklist === null || checklist.required) {
-    // The one-time runtime chooser appears *before* detection on first run.
-    if (config && !config.runtimeModeSelected) {
-      return (
-        <RuntimeChoiceDialog
-          config={config}
-          appVersion={checklist?.appVersion ?? ""}
-          onConfigChange={setConfig}
-          onConfirm={triggerBootstrap}
-        />
-      );
-    }
-    return (
-      <BootScreen
-        status={status}
+    content = <ErrorScreen status={status} />;
+  } else if (checklist === null || checklist.required) {
+    content = (
+      <SetupScreen
+        key={setupRevision}
         logs={logs}
         config={config}
-        theme={theme}
-        appVersion={checklist?.appVersion ?? ""}
         onConfigChange={setConfig}
+        onEntered={handleSetupEntered}
+        detectOnMount={Boolean(checklist?.required)}
         logEndRef={logEndRef}
       />
     );
+  } else {
+    content = <MinimalSplash status={status} />;
   }
 
-  return <MinimalSplash status={status} />;
+  return (
+    <>
+      {content}
+      {dshUpdate && <DshUpdateDialog info={dshUpdate} onClose={() => setDshUpdate(null)} />}
+    </>
+  );
 }

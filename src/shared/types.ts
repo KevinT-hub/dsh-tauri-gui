@@ -1,3 +1,5 @@
+// Rust command/event 对应的公共类型（与 src-tauri 侧 serde 契约一一对应）
+
 export type ShellPhase =
   | "idle"
   | "bootstrapping"
@@ -21,13 +23,60 @@ export interface ShellLogLine {
   line: string;
 }
 
-export interface RuntimeUpdateCheck {
-  current: string;
-  latest: string;
-  updateAvailable: boolean;
+// ---------------------------------------------------------------------------
+// 环境检测（detection）
+// ---------------------------------------------------------------------------
+
+export type DependencyId = "node" | "npm" | "pnpm" | "dsh";
+
+export type CheckStatus =
+  | "checking"
+  | "passed"
+  | "missing"
+  | "unsupported"
+  | "unknown";
+
+export interface DependencyInfo {
+  id: DependencyId;
+  status: CheckStatus;
+  path: string | null;
+  version: string | null;
+  error: string | null;
+  installHint: string | null;
 }
 
-export type RuntimeMode = "bundled" | "system";
+export type RegionCode = "cn" | "world" | "unknown";
+
+export interface GeoResult {
+  region: RegionCode;
+  country: string | null;
+  matched: number;
+  total: number;
+  sources: string[];
+}
+
+export interface SourcePolicy {
+  region: RegionCode;
+  npmRegistry: string;
+  nodeMirror: string;
+}
+
+export interface SetupState {
+  appVersion: string;
+  dependencies: DependencyInfo[];
+  allPassed: boolean;
+  sourcePolicy: SourcePolicy;
+  geo: GeoResult;
+}
+
+export interface GeoState {
+  geo: GeoResult;
+  sourcePolicy: SourcePolicy;
+}
+
+// ---------------------------------------------------------------------------
+// 应用配置与诊断
+// ---------------------------------------------------------------------------
 
 export interface ShellConfig {
   minimizeToTray: boolean;
@@ -39,10 +88,9 @@ export interface ShellConfig {
   uiTheme: "light" | "dark" | "system";
   firstRunCompleted: boolean;
   lastChecklistVersion: string;
+  setupSeenVersion: string;
   webuiPort: number;
   engineHome: string | null;
-  runtimeMode: RuntimeMode;
-  runtimeModeSelected: boolean;
 }
 
 export interface ChecklistState {
@@ -54,10 +102,8 @@ export interface Diagnostics {
   appVersion: string;
   dshVersion: string | null;
   nodeVersion: string | null;
-  runtimeMode: RuntimeMode | null;
   shellHome: string;
   engineHome: string;
-  runtimeDir: string;
   logsDir: string;
   webuiPort: number;
   status: ShellStatus;
@@ -70,6 +116,10 @@ export interface ThemeState {
   effective: "light" | "dark" | "system";
 }
 
+// ---------------------------------------------------------------------------
+// 应用更新
+// ---------------------------------------------------------------------------
+
 export interface AppUpdateInfo {
   available: boolean;
   version: string;
@@ -78,6 +128,14 @@ export interface AppUpdateInfo {
   downloadUrl: string;
   sha256: string;
   source: string;
+}
+
+export interface DshUpdateInfo {
+  available: boolean;
+  currentVersion: string;
+  latestVersion: string;
+  installCommand: string;
+  registry: string;
 }
 
 export interface DownloadProgressEvent {

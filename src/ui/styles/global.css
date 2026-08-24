@@ -1,0 +1,60 @@
+/* 全局 reset 与布局基础 */
+
+@import "tailwindcss";
+@import "./tokens.css";
+@import "./animations.css";
+
+:root {
+  font-family:
+    "Inter", "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  overflow: hidden;
+}
+
+/* Material Web components inherit the shell theme through color-scheme. */
+md-filled-button,
+md-outlined-button,
+md-circular-progress,
+md-linear-progress {
+  --md-sys-color-primary: var(--md-primary, #1f6feb);
+  --md-sys-color-on-primary: #ffffff;
+  --md-sys-color-surface: var(--md-surface, #ffffff);
+  --md-sys-color-surface-container-low: var(--md-surface-low, #f6f8fa);
+  --md-filled-button-container-shape: 8px;
+  --md-outlined-button-container-shape: 8px;
+  --md-text-button-container-shape: 8px;
+  --md-filled-button-container-height: 44px;
+  --md-outlined-button-container-height: 44px;
+  --md-text-button-container-height: 40px;
+}
+
+md-filled-button::part(button),
+md-outlined-button::part(button),
+md-text-button::part(button) {
+  white-space: nowrap;
+  padding-inline: 24px;
+  border-radius: 8px !important;
+}
+
+md-list {
+  --md-list-container-color: transparent;
+  --md-list-item-container-shape: 8px;
+}
+
+md-list-item {
+  --md-list-item-container-color: transparent;
+  --md-list-item-container-shape: 8px;
+  --md-list-item-label-text-color: var(--md-on-surface);
+  --md-list-item-supporting-text-color: var(--md-on-surface-variant);
+}

@@ -1,0 +1,39 @@
+/* Material Web design tokens（亮/暗主题变量） */
+
+:root {
+  --md-primary: #1f6feb;
+  --md-surface: #ffffff;
+  --md-surface-low: #f6f8fa;
+  --md-on-surface: #1f2328;
+  --md-on-surface-variant: #656d76;
+  --md-outline: #d0d7de;
+  --md-error: #cf222e;
+  --md-ok: #1a7f37;
+  --md-warn: #9a6700;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --md-primary: #4dabf7;
+  --md-surface: #161b22;
+  --md-surface-low: #0d1117;
+  --md-on-surface: #e6edf3;
+  --md-on-surface-variant: #8b949e;
+  --md-outline: #30363d;
+  --md-error: #f85149;
+  --md-ok: #3fb950;
+  --md-warn: #d29922;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --md-primary: #1f6feb;
+  --md-surface: #ffffff;
+  --md-surface-low: #f6f8fa;
+  --md-on-surface: #1f2328;
+  --md-on-surface-variant: #656d76;
+  --md-outline: #d0d7de;
+  --md-error: #cf222e;
+  --md-ok: #1a7f37;
+  --md-warn: #9a6700;
+}
