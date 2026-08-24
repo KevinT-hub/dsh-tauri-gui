@@ -1,7 +1,7 @@
 <h1 align="center">dsh-tauri-gui</h1>
 
 <p align="center">
-  <a href="https://github.com/KevinT-hub/dsh-tauri-gui/actions/workflows/release.yml"><img alt="Release Build" src="https://github.com/KevinT-hub/dsh-tauri-gui/actions/workflows/release.yml/badge.svg"></a>
+  <a href="https://github.com/KevinT-hub/dsh-tauri-gui/releases"><img alt="Latest Release" src="https://img.shields.io/github/v/release/KevinT-hub/dsh-tauri-gui?style=flat-square&label=release"></a>
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-263146?style=flat-square"></a>
   <img alt="Platforms" src="https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-4b6fff?style=flat-square">
   <img alt="Tauri v2" src="https://img.shields.io/badge/Tauri-v2-4b6fff?style=flat-square">
@@ -69,12 +69,36 @@ pnpm tauri dev
 ## 仓库结构
 
 ```text
-src/            React 壳层 UI（app / features / shared / ui）
-src-tauri/      Rust/Tauri 原生壳层（app / commands / core / detection / engine / geo / ui / update）
-scripts/        版本、Release 与发行物处理脚本
-tests/          Node 脚本、Release 工具与跨层契约测试
-docs/           用户文档、架构文档、安装与发布说明
-.github/        CI / Release / updater channel 工作流
+dsh-tauri-gui/
+├─ src/                        React 桌面壳层 UI
+│  ├─ main.tsx / App.tsx       应用入口与根组件
+│  ├─ features/                功能模块
+│  │  ├─ setup/                环境检测 / 安装帮助页面
+│  │  ├─ updater/              应用与 dsh 更新覆盖层
+│  │  ├─ splash/               启动闪屏
+│  │  └─ error/                异常兜底页
+│  ├─ shared/                  前后端桥接、主题、类型定义
+│  ├─ ui/                      样式（tokens / global / animations）
+│  └─ types/                   类型声明
+├─ src-tauri/                  Rust / Tauri 原生壳层
+│  ├─ src/
+│  │  ├─ app/                  配置、事件、生命周期、状态
+│  │  ├─ commands/             Tauri 命令（setup / geo / updater / shell）
+│  │  ├─ core/                 错误 / 文件 / HTTP / 路径 / 进程 / 平台
+│  │  ├─ detection/            依赖探测 + 安装帮助（不内置运行时）
+│  │  ├─ engine/               dsh web 生命周期与协议
+│  │  ├─ geo/                  地区识别（镜像策略）
+│  │  ├─ ui/                   托盘 / 窗口 / 主题
+│  │  └─ update/               自动更新（校验 / 下载 / dsh）
+│  ├─ capabilities/            权限声明
+│  ├─ tests/                   Rust 集成测试
+│  └─ build.rs / Cargo.toml / tauri.conf.json / rust-toolchain.toml
+├─ scripts/                    版本 / Release / 产物处理脚本
+├─ tests/                      Node 脚本与跨层契约测试
+├─ docs/                       用户文档、架构、安装与发布说明
+├─ .github/workflows/          CI / Release / 更新通道
+├─ public/ · dist/ · index.html   静态资源与构建产物
+└─ package.json · pnpm-lock.yaml · vite.config.ts · tsconfig*.json
 ```
 
 ## 文档

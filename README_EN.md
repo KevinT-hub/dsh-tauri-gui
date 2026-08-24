@@ -1,7 +1,7 @@
 <h1 align="center">dsh-tauri-gui</h1>
 
 <p align="center">
-  <a href="https://github.com/KevinT-hub/dsh-tauri-gui/actions/workflows/release.yml"><img alt="Release Build" src="https://github.com/KevinT-hub/dsh-tauri-gui/actions/workflows/release.yml/badge.svg"></a>
+  <a href="https://github.com/KevinT-hub/dsh-tauri-gui/releases"><img alt="Latest Release" src="https://img.shields.io/github/v/release/KevinT-hub/dsh-tauri-gui?style=flat-square&label=release"></a>
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-263146?style=flat-square"></a>
   <img alt="Platforms" src="https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-4b6fff?style=flat-square">
   <img alt="Tauri v2" src="https://img.shields.io/badge/Tauri-v2-4b6fff?style=flat-square">
@@ -69,12 +69,36 @@ Release builds are downloaded from [Releases](https://github.com/KevinT-hub/dsh-
 ## Repository layout
 
 ```text
-src/            React shell UI (app / features / shared / ui)
-src-tauri/      Rust/Tauri native shell (app / commands / core / detection / engine / geo / ui / update)
-scripts/        version, release and artifact tooling
-tests/          Node scripts, release tooling and cross-layer contract tests
-docs/           user docs, architecture, installation and release notes
-.github/        CI / Release / updater-channel workflows
+dsh-tauri-gui/
+├─ src/                        React desktop shell UI
+│  ├─ main.tsx / App.tsx       app entry and root component
+│  ├─ features/                feature modules
+│  │  ├─ setup/                environment detection / install-help screen
+│  │  ├─ updater/              app & dsh update overlay
+│  │  ├─ splash/               launch splash
+│  │  └─ error/                error fallback screen
+│  ├─ shared/                  bridge, theme, type definitions
+│  ├─ ui/                      styles (tokens / global / animations)
+│  └─ types/                   type declarations
+├─ src-tauri/                  Rust / Tauri native shell
+│  ├─ src/
+│  │  ├─ app/                  config, events, lifecycle, state
+│  │  ├─ commands/             Tauri commands (setup / geo / updater / shell)
+│  │  ├─ core/                 error / fs / http / path / process / platform
+│  │  ├─ detection/            dependency probing + install help (no bundled runtime)
+│  │  ├─ engine/               dsh web lifecycle and protocol
+│  │  ├─ geo/                  region detection (mirror policy)
+│  │  ├─ ui/                   tray / windows / theme
+│  │  └─ update/               auto-update (verify / download / dsh)
+│  ├─ capabilities/            permission declarations
+│  ├─ tests/                   Rust integration tests
+│  └─ build.rs / Cargo.toml / tauri.conf.json / rust-toolchain.toml
+├─ scripts/                    version / release / artifact tooling
+├─ tests/                      Node scripts and cross-layer contract tests
+├─ docs/                       user docs, architecture, install and release notes
+├─ .github/workflows/          CI / Release / updater-channel
+├─ public/ · dist/ · index.html   static assets and build output
+└─ package.json · pnpm-lock.yaml · vite.config.ts · tsconfig*.json
 ```
 
 ## Docs
