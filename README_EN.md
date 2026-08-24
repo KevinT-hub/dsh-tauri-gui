@@ -1,7 +1,7 @@
 <h1 align="center">dsh-tauri-gui</h1>
 
 <p align="center">
-  <a href="https://github.com/KevinT-hub/dsh-tauri-gui/releases"><img alt="Latest Release" src="https://img.shields.io/github/v/release/KevinT-hub/dsh-tauri-gui?style=flat-square&label=release"></a>
+  <a href="https://github.com/KevinT-hub/dsh-tauri-gui/releases"><img alt="Latest Release" src="https://img.shields.io/github/v/release/KevinT-hub/dsh-tauri-gui?style=flat-square&label=release&include_prereleases"></a>
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-263146?style=flat-square"></a>
   <img alt="Platforms" src="https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-4b6fff?style=flat-square">
   <img alt="Tauri v2" src="https://img.shields.io/badge/Tauri-v2-4b6fff?style=flat-square">
