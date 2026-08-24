@@ -13,7 +13,10 @@
 //! `engine/` and `update/` on top of it.
 
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::Command;
+
+#[cfg(windows)]
+use std::process::Stdio;
 
 /// Prevent console-subsystem child processes from opening a visible console
 /// window when the desktop shell itself is a Windows GUI application.
