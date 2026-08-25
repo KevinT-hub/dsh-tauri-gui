@@ -8,11 +8,44 @@ use tauri::{AppHandle, Emitter};
 #[serde(rename_all = "camelCase")]
 pub struct ShellStatus {
     pub phase: &'static str,
-    pub message: String,
+    pub code: &'static str,
     pub detail: Option<String>,
     pub url: Option<String>,
     pub progress: Option<f64>,
     pub engine_version: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateNotice {
+    pub target: &'static str,
+    pub phase: &'static str,
+    pub version: Option<String>,
+    pub error: Option<String>,
+}
+
+pub fn set_update_notice(
+    state: &AppState,
+    app: &AppHandle,
+    target: &'static str,
+    phase: &'static str,
+    version: Option<String>,
+    error: Option<String>,
+) {
+    let notice = UpdateNotice {
+        target,
+        phase,
+        version,
+        error,
+    };
+    *state.update_notice.lock().unwrap() = Some(notice.clone());
+    let _ = app.emit(crate::app::events::UPDATE_NOTICE_EVENT, notice);
+    crate::ui::windows::sync_update_overlay(app);
+}
+
+pub fn clear_update_notice(state: &AppState, app: &AppHandle) {
+    state.update_notice.lock().unwrap().take();
+    crate::ui::windows::sync_update_overlay(app);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -20,7 +53,7 @@ pub fn set_status(
     state: &AppState,
     app: Option<&AppHandle>,
     phase: &'static str,
-    message: impl Into<String>,
+    code: &'static str,
     detail: Option<String>,
     url: Option<String>,
     progress: Option<f64>,
@@ -28,7 +61,7 @@ pub fn set_status(
 ) {
     let status = ShellStatus {
         phase,
-        message: message.into(),
+        code,
         detail,
         url,
         progress,
