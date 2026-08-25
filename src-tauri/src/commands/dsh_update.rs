@@ -5,9 +5,17 @@ use std::sync::Arc;
 use tauri::{AppHandle, Manager};
 
 #[tauri::command]
+pub fn get_dsh_update(app: AppHandle) -> Option<crate::update::DshUpdateInfo> {
+    let state: Arc<AppState> = app.state::<Arc<AppState>>().inner().clone();
+    let update = state.dsh_update.lock().unwrap().clone();
+    update
+}
+
+#[tauri::command]
 pub async fn install_dsh_update(app: AppHandle) -> Result<(), String> {
     let state: Arc<AppState> = app.state::<Arc<AppState>>().inner().clone();
-    let was_running = state.engine.lock().unwrap().is_some();
+    let was_running =
+        state.engine.lock().unwrap().is_some() || state.engine_session.lock().unwrap().is_some();
     if was_running {
         crate::engine::stop_engine(&state);
     }
