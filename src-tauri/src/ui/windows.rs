@@ -46,11 +46,12 @@ pub fn sync_update_overlay(app: &AppHandle) {
         .as_ref()
         .map(|info| info.available)
         .unwrap_or(false);
+    let has_notice = state.update_notice.lock().unwrap().is_some();
     let visible = match app.get_webview_window("main") {
         Some(main) => main.is_visible().unwrap_or(false) && !main.is_minimized().unwrap_or(false),
         None => false,
     };
-    if available && visible {
+    if visible && (available || has_notice) {
         reposition_update_overlay(app);
         let _ = overlay.show();
     } else {
