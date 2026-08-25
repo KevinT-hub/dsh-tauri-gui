@@ -46,7 +46,6 @@ pub async fn run_detection_v2(app: AppHandle) -> Result<SetupState, String> {
 
 async fn run_detection_inner(app: AppHandle, state: Arc<AppState>) -> Result<SetupState, String> {
     let region = resolve_region(&state);
-    *state.command_spec.lock().unwrap() = None;
     crate::app::emit_log(
         &state,
         Some(&app),
@@ -89,7 +88,7 @@ async fn run_detection_inner(app: AppHandle, state: Arc<AppState>) -> Result<Set
         );
     }
 
-    let all_passed = detection::gate_passed(&dependencies);
+    let mut all_passed = detection::gate_passed(&dependencies);
     if all_passed {
         match detection::aggregate::command_spec(&dependencies) {
             Ok(spec) => {
@@ -104,23 +103,62 @@ async fn run_detection_inner(app: AppHandle, state: Arc<AppState>) -> Result<Set
                     ),
                 );
                 *state.command_spec.lock().unwrap() = Some(spec);
+                if let Some(spec) = state.command_spec.lock().unwrap().clone() {
+                    if let Err(err) = crate::app::toolchain_cache::save(&state.home, &spec) {
+                        state
+                            .logger
+                            .warn(&format!("failed to save toolchain cache: {err}"));
+                    }
+                }
+
+                // Warm up dsh while the user is still viewing the completed
+                // checklist. Previously the engine was first started only
+                // after clicking "Enter Harness", which added a second
+                // loading phase after the detection page.
+                let engine_app = app.clone();
+                let engine_state = state.clone();
+                std::thread::spawn(move || {
+                    if engine_state.stopping.load(Ordering::SeqCst) {
+                        return;
+                    }
+                    engine_state.stopping.store(false, Ordering::SeqCst);
+                    if let Err(err) =
+                        crate::engine::connect_existing_or_spawn(&engine_app, &engine_state)
+                    {
+                        crate::app::set_status(
+                            &engine_state,
+                            Some(&engine_app),
+                            "error",
+                            "engineStartFailed",
+                            Some(err),
+                            None,
+                            None,
+                            None,
+                        );
+                    }
+                });
 
                 let update_app = app.clone();
                 let update_state = state.clone();
                 std::thread::spawn(move || {
-                    crate::ui::tray::check_dsh_update_now(update_app, update_state);
+                    let _ = crate::ui::tray::check_dsh_update_now(update_app, update_state);
                 });
             }
             Err(err) => {
+                *state.command_spec.lock().unwrap() = None;
+                crate::app::toolchain_cache::clear(&state.home);
                 crate::app::emit_log(
                     &state,
                     Some(&app),
                     "ERROR",
                     format!("environment gate passed but command spec failed: {err}"),
                 );
+                all_passed = false;
             }
         }
     } else {
+        *state.command_spec.lock().unwrap() = None;
+        crate::app::toolchain_cache::clear(&state.home);
         crate::app::emit_log(
             &state,
             Some(&app),
@@ -139,7 +177,6 @@ async fn run_detection_inner(app: AppHandle, state: Arc<AppState>) -> Result<Set
         if all_passed { "INFO" } else { "WARN" },
         format!("[detect] completed: allPassed={all_passed}"),
     );
-
     let source_policy = detection::resolve_sources(region.region);
     Ok(SetupState {
         app_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -215,40 +252,23 @@ pub async fn install_dependency_v2(
 
 #[tauri::command]
 pub fn recheck_environment_v2(app: AppHandle) {
+    // The tray's recheck action stops the current engine first. Allow the
+    // successful detection below to warm a fresh engine again.
+    let initial_state: Arc<AppState> = app.state::<Arc<AppState>>().inner().clone();
+    initial_state.stopping.store(false, Ordering::SeqCst);
     let app_for_task = app.clone();
     std::thread::spawn(move || {
         let state: Arc<AppState> = app_for_task.state::<Arc<AppState>>().inner().clone();
         let result = tauri::async_runtime::block_on(run_detection_v2(app_for_task.clone()));
         match result {
             Ok(setup) => {
-                if setup.all_passed {
-                    crate::app::emit_log(
-                        &state,
-                        Some(&app_for_task),
-                        "INFO",
-                        "环境检测通过，启动引擎…".to_string(),
-                    );
-                    if let Err(err) =
-                        crate::engine::connect_existing_or_spawn(&app_for_task, &state)
-                    {
-                        crate::app::set_status(
-                            &state,
-                            Some(&app_for_task),
-                            "error",
-                            "引擎启动失败",
-                            Some(err),
-                            None,
-                            None,
-                            None,
-                        );
-                    }
-                } else {
+                if !setup.all_passed {
                     crate::app::set_status(
                         &state,
                         Some(&app_for_task),
                         "error",
-                        "环境检测未通过",
-                        Some("缺少必需依赖，请打开主窗口查看详情。".to_string()),
+                        "environmentFailed",
+                        None,
                         None,
                         None,
                         None,
