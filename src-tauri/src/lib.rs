@@ -38,13 +38,10 @@ pub fn run() {
                 return;
             };
             if engine::is_shell_url(&url) {
-                // Shell page (setup checklist / splash): show only when the
-                // version-gated checklist is active; otherwise stay hidden
-                // until the Web UI is ready.
-                let checklist = app::config::checklist_required_full(&state);
-                if checklist {
-                    ui::windows::show_main_window(app);
-                }
+                // The shell page is the loading surface for both the
+                // checklist and normal startup. Do not wait for the dsh Web
+                // UI to become ready before revealing it.
+                ui::windows::show_main_window(app);
                 return;
             }
             if engine::is_allowed_web_url(&state, &url) {
@@ -59,6 +56,11 @@ pub fn run() {
             std::fs::create_dir_all(&logs_dir)?;
             let logger = Logger::new(logs_dir.clone());
             let (config, config_path) = app::config::load(&home);
+            let shell_url = app
+                .get_webview_window("main")
+                .and_then(|window| window.url().ok())
+                .map(|url| url.to_string())
+                .unwrap_or_else(|| "http://tauri.localhost/".to_string());
             let engine_home = config
                 .engine_home
                 .as_deref()
@@ -72,12 +74,15 @@ pub fn run() {
                 logger,
                 config,
                 config_path,
+                shell_url,
             ));
             app.manage(state.clone());
             state.logger.info(&format!(
                 "desktop shell starting, home: {}",
                 state.home.display()
             ));
+
+            app::bootstrap::start_cached_engine(app.handle(), state.clone());
 
             ui::tray::setup_tray(app).map_err(|err| {
                 state.logger.error(&format!("tray setup failed: {err}"));
@@ -137,10 +142,13 @@ pub fn run() {
             commands::setup::enter_harness,
             commands::setup_flow::recheck_environment_v2,
             commands::setup_flow::begin_setup_v2,
+            commands::dsh_update::get_dsh_update,
             commands::dsh_update::install_dsh_update,
             commands::geo::get_geo_state,
             commands::updater::check_app_update,
             commands::updater::apply_app_update,
+            commands::updater::get_app_update,
+            commands::updater::get_update_notice,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
@@ -148,7 +156,6 @@ pub fn run() {
             if let tauri::RunEvent::ExitRequested { .. } = event {
                 let state = app_handle.state::<Arc<AppState>>();
                 app::lifecycle::shutdown(&state);
-                app_handle.cleanup_before_exit();
             }
         });
 }
@@ -158,13 +165,13 @@ pub fn run() {
 fn schedule_app_update_check(app: tauri::AppHandle, state: Arc<AppState>) {
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_secs(3));
-        ui::tray::check_app_update_now(app, state);
+        let _ = ui::tray::check_app_update_now(app, state);
     });
 }
 
 fn schedule_dsh_update_check(app: tauri::AppHandle, state: Arc<AppState>) {
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_secs(4));
-        ui::tray::check_dsh_update_now(app, state);
+        let _ = ui::tray::check_dsh_update_now(app, state);
     });
 }
