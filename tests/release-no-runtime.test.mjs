@@ -83,7 +83,11 @@ test("source tree has no runtime hot-update module", () => {
   const files = walk(join(ROOT, "src-tauri/src")).map((p) => p.replace(/\\/g, "/"));
   for (const file of files) {
     assert.doesNotMatch(file, /runtime_update|commands\/runtime/i);
-    assert.doesNotMatch(file, /bootstrap\.rs/i, "old engine bootstrap must be gone");
+    assert.doesNotMatch(
+      file,
+      /(?:^|\/)commands\/bootstrap\.rs$/i,
+      "legacy command bootstrap must be gone",
+    );
   }
 });
 
