@@ -6,13 +6,12 @@ import MinimalSplash from "./features/splash/MinimalSplash";
 import UpdateOverlay from "./features/updater/UpdateOverlay";
 import DshUpdateDialog from "./features/updater/DshUpdateDialog";
 import {
-  beginSetup,
   getChecklistState,
+  getDshUpdate,
   getShellConfig,
   getShellStatus,
   notifyShellReady,
   onDshUpdate,
-  onSetupRequested,
   onShellLog,
   onShellStatus,
 } from "./shared/bridge";
@@ -29,13 +28,15 @@ const MAX_LOG_LINES = 120;
 function useShellState() {
   const [status, setStatus] = useState<ShellStatus>({
     phase: "idle",
-    message: "正在连接桌面壳…",
+    code: "initializing",
   });
   const [logs, setLogs] = useState<ShellLogLine[]>([]);
   const [config, setConfig] = useState<ShellConfig | null>(null);
 
   useEffect(() => {
     let disposed = false;
+    let unlistenStatus: (() => void) | undefined;
+    let unlistenLog: (() => void) | undefined;
     void getShellStatus().then((value) => {
       if (!disposed) setStatus(value);
     });
@@ -44,13 +45,21 @@ function useShellState() {
     });
     void onShellStatus((value) => {
       if (!disposed) setStatus(value);
+    }).then((unlisten) => {
+      if (disposed) unlisten();
+      else unlistenStatus = unlisten;
     });
     void onShellLog((value) => {
       if (disposed) return;
       setLogs((prev) => [...prev.slice(-(MAX_LOG_LINES - 1)), value]);
+    }).then((unlisten) => {
+      if (disposed) unlisten();
+      else unlistenLog = unlisten;
     });
     return () => {
       disposed = true;
+      unlistenStatus?.();
+      unlistenLog?.();
     };
   }, []);
 
@@ -63,7 +72,6 @@ export default function App() {
   const [windowLabel] = useState(() => getCurrentWindow().label);
   const [checklist, setChecklist] = useState<ChecklistState | null>(null);
   const [dshUpdate, setDshUpdate] = useState<DshUpdateInfo | null>(null);
-  const [setupRevision, setSetupRevision] = useState(0);
   const checklistResolved = useRef(false);
 
   useEffect(() => {
@@ -80,41 +88,25 @@ export default function App() {
 
   useEffect(() => {
     let disposed = false;
-    void onSetupRequested(() => {
-      if (disposed) return;
-      checklistResolved.current = true;
-      setSetupRevision((value) => value + 1);
-      setChecklist((current) => ({
-        required: true,
-        appVersion: current?.appVersion ?? "",
-      }));
+    let unlisten: (() => void) | undefined;
+    void getDshUpdate().then((info) => {
+      if (!disposed && info?.available) {
+        setDshUpdate(info);
+      }
     });
-    return () => {
-      disposed = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    let disposed = false;
     void onDshUpdate((info) => {
       if (!disposed && info.available) {
         setDshUpdate(info);
       }
+    }).then((remove) => {
+      if (disposed) remove();
+      else unlisten = remove;
     });
     return () => {
       disposed = true;
+      unlisten?.();
     };
   }, []);
-
-  useEffect(() => {
-    if (checklist === null || checklistResolved.current) {
-      return;
-    }
-    checklistResolved.current = true;
-    if (!checklist.required) {
-      void beginSetup();
-    }
-  }, [checklist]);
 
   const handleSetupEntered = useCallback(() => {
     checklistResolved.current = true;
@@ -130,11 +122,7 @@ export default function App() {
 
   useEffect(() => {
     if (windowLabel === "update-overlay") return;
-    const frame = window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => {
-        void notifyShellReady();
-      });
-    });
+    const frame = window.requestAnimationFrame(() => void notifyShellReady());
     return () => window.cancelAnimationFrame(frame);
   }, [windowLabel]);
 
@@ -148,9 +136,9 @@ export default function App() {
   } else if (checklist === null || checklist.required) {
     content = (
       <SetupScreen
-        key={setupRevision}
         logs={logs}
         config={config}
+        status={status}
         onConfigChange={setConfig}
         onEntered={handleSetupEntered}
         detectOnMount={Boolean(checklist?.required)}
