@@ -61,7 +61,7 @@ flowchart TD
 ```
 
 - **版本门禁**（`app/config.rs`）：新增 `setupSeenVersion` 字段——检测页**首次显示即写入**，因此即使依赖缺失或用户中途退出，同一版本的下一次启动也不会自动重复弹出；检测失败时进入错误/帮助状态，用户可通过**托盘 → 重新检测环境**手动重试。
-- **引擎就绪判定**：监听 dsh 进程输出中的 `dsh web: <url>` 行，解析出 `http://127.0.0.1:<port>` 并记录到 `ready_url`；Webview 仅在来源命中白名单后才导航，随后显示窗口。
+- **引擎就绪判定**：通过本地健康检查确认 `__DSH_BOOT__` 响应，解析出 `http://127.0.0.1:<port>` 并记录到 `ready_url`；WebView 仅在来源命中白名单后才导航，随后显示窗口。首次检测页完成后，如果引擎已经在预热期间就绪，`navigate_when_ready` 会补发一次导航。状态事件只传稳定 `code`，展示文案由前端映射。
 - **旧配置兼容**：历史版本中的 `runtimeMode` / `runtimeModeSelected` 字段被 serde 静默忽略（无 `deny_unknown_fields`），读取与保存均不会破坏既有配置。
 
 ## 引擎生命周期
@@ -71,10 +71,10 @@ flowchart TD
 - `command.rs`：由已验证 `CommandSpec` 构造命令（Windows `.cmd`/`.bat` shim 经 `cmd.exe /d /c`），统一追加 `web --no-open --port <port>`；
 - `environment.rs`：`PATH` 前置 node/npm 目录、`DSH_HOME`（默认 `~/.dsh`）、`DSH_TELEMETRY_DISABLED`、`npm_config_registry`、`NO_COLOR=1`；
 - `workspace.rs`：默认工作目录为用户主目录，可用 `defaultWorkspace` 覆盖；
-- `process.rs`：子进程启动（隐藏控制台、参数数组）、stdout/stderr 泵取、退出监控；
-- `lifecycle.rs`：**连接或拉起（connect-or-spawn）**——启动前探测端口上是否已有 `dsh web` 实例（`__DSH_BOOT__` 标记），有则直接连接；`restart_on_crash` 时 2 秒后自动重启；端口被占用（`EADDRINUSE`/`EACCES`）自动回退系统分配端口；停止时先置 `stopping` 标志，Windows 用 `taskkill /T /F` 结束整棵进程树；
+- `process.rs`：子进程启动（隐藏控制台、参数数组、文件日志）与退出监控；不依赖 stdout 管道，因此引擎可以在桌面壳退出后保持运行；
+- `lifecycle.rs`：**连接或拉起（connect-or-spawn）**——启动前探测端口上是否已有 `dsh web` 实例（`__DSH_BOOT__` 标记），有则直接连接；`restart_on_crash` 时 2 秒后自动重启；端口被占用时自动回退系统分配端口；显式重启/重新检测/更新时用 `taskkill /T /F` 结束整棵进程树；
+- `app/engine_session.rs`：只在桌面壳目录保存引擎 PID/端口交接信息，启动时用于快速复用；不写入 `$DSH_HOME`；
 - `web.rs`：端口探测、WebView 来源白名单与导航；
-- `protocol.rs`：`dsh web: <url>` ready marker 解析。
 
 ## 安全边界
 
