@@ -26,7 +26,7 @@
         "label": "update-overlay",
         "title": "Update",
         "width": 360,
-        "height": 132,
+        "height": 184,
         "decorations": false,
         "transparent": true,
         "alwaysOnTop": true,
