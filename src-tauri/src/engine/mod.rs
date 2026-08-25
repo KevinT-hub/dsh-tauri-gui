@@ -9,12 +9,12 @@ pub mod command;
 pub mod environment;
 pub mod lifecycle;
 pub mod process;
-pub mod protocol;
 pub mod web;
 pub mod workspace;
 
 pub use lifecycle::{
-    connect_existing_or_spawn, open_web_ui, open_web_ui_browser, restart_engine, stop_engine,
+    connect_existing_or_spawn, detach_engine, navigate_when_ready, open_web_ui,
+    open_web_ui_browser, restart_engine, stop_engine,
 };
-pub use web::{is_allowed_web_url, is_shell_url};
+pub use web::{is_allowed_web_url, is_shell_url, navigate_to_shell};
 pub use workspace::workspace_dir;
