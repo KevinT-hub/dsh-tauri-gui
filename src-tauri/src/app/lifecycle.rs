@@ -1,4 +1,4 @@
-//! Application lifecycle helpers: single-instance focus, engine shutdown on
+//! Application lifecycle helpers: single-instance focus, engine handoff on
 //! exit and the window-show policy shared by lib.rs and the tray.
 
 use crate::app::state::AppState;
@@ -16,7 +16,8 @@ pub fn show_main(app: &AppHandle) {
     crate::ui::windows::sync_update_overlay(app);
 }
 
-/// Shut the engine down cleanly before the process exits.
+/// Release the desktop shell while keeping the warm engine available for the
+/// next launch. Explicit restart/recheck/update actions still stop it.
 pub fn shutdown(state: &Arc<AppState>) {
-    crate::engine::stop_engine(state);
+    crate::engine::detach_engine(state);
 }
