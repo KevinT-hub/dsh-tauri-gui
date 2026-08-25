@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { getDiagnostics, openLogsDir, quitApp, restartEngine } from "../../shared/bridge";
 import type { Diagnostics, ShellStatus } from "../../shared/types";
+import { shellStatusLabel } from "../../shared/status";
 
 interface ErrorScreenProps {
   status: ShellStatus;
@@ -20,7 +21,7 @@ function buildReport(diag: Diagnostics): string {
     "",
     "状态:",
     `  phase: ${diag.status.phase}`,
-    `  message: ${diag.status.message}`,
+    `  code: ${diag.status.code}`,
     `  detail: ${diag.status.detail ?? ""}`,
     `  url: ${diag.status.url ?? ""}`,
     "",
@@ -33,6 +34,8 @@ function buildReport(diag: Diagnostics): string {
 export default function ErrorScreen({ status }: ErrorScreenProps) {
   const [diag, setDiag] = useState<Diagnostics | null>(null);
   const [copied, setCopied] = useState(false);
+  const [restarting, setRestarting] = useState(false);
+  const [restartError, setRestartError] = useState<string | null>(null);
 
   useEffect(() => {
     let disposed = false;
@@ -45,6 +48,18 @@ export default function ErrorScreen({ status }: ErrorScreenProps) {
   }, []);
 
   const report = diag ? buildReport(diag) : "";
+
+  const restart = async () => {
+    setRestarting(true);
+    setRestartError(null);
+    try {
+      await restartEngine();
+      setRestarting(false);
+    } catch (error) {
+      setRestartError(error instanceof Error ? error.message : String(error));
+      setRestarting(false);
+    }
+  };
 
   const copyReport = async () => {
     if (!report) return;
@@ -80,8 +95,9 @@ export default function ErrorScreen({ status }: ErrorScreenProps) {
         </header>
 
         <p className="mb-4 text-sm text-[var(--md-error)]">
-          {status.detail ?? status.message}
+          {shellStatusLabel(status)}
         </p>
+        {restartError && <p className="mb-4 text-sm text-[var(--md-error)]">重启失败：{restartError}</p>}
 
         <pre className="max-h-72 overflow-auto rounded-xl bg-[var(--md-surface-low)] p-4 font-mono text-xs leading-relaxed whitespace-pre-wrap break-all text-[var(--md-on-surface-variant)]">
           {report || "正在收集诊断信息…"}
@@ -91,8 +107,8 @@ export default function ErrorScreen({ status }: ErrorScreenProps) {
           <md-outlined-button onClick={() => void copyReport()} disabled={!report}>
             {copied ? "已复制 ✓" : "复制错误报告"}
           </md-outlined-button>
-          <md-outlined-button onClick={() => void restartEngine()}>
-            重启引擎
+          <md-outlined-button onClick={() => void restart()} disabled={restarting}>
+            {restarting ? "正在重启…" : "重启引擎"}
           </md-outlined-button>
           <md-text-button onClick={openLogsDir}>打开日志</md-text-button>
           <md-text-button onClick={quitApp}>退出</md-text-button>
