@@ -120,3 +120,24 @@ pub fn kill_process_tree(child: &mut std::process::Child) {
     }
     let _ = child.wait();
 }
+
+/// Kill a previously detached engine by PID. The caller must only pass a PID
+/// recovered from the engine handoff record after verifying its local port.
+pub fn kill_process_id(pid: u32) {
+    #[cfg(windows)]
+    {
+        let mut taskkill = Command::new("taskkill");
+        taskkill
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        hide_console(&mut taskkill);
+        let _ = taskkill.status();
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = Command::new("kill")
+            .args(["-TERM", &pid.to_string()])
+            .status();
+    }
+}
