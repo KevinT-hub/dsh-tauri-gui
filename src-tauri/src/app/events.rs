@@ -1,7 +1,8 @@
 //! Rust → frontend event names. Keeping the constants here avoids string
 //! literals scattered across the codebase.
 
-/// Shell phase/message updates (`ShellStatus` payload).
+/// Shell state updates (`ShellStatus` payload); the frontend maps stable codes
+/// to localized presentation text.
 pub const STATUS_EVENT: &str = "shell://status";
 /// Live log lines (`{"level","line"}` payload).
 pub const LOG_EVENT: &str = "shell://log";
@@ -11,7 +12,7 @@ pub const THEME_EVENT: &str = "shell://theme";
 pub const APP_UPDATE_EVENT: &str = "shell://app-update";
 /// DeepSeek Harness package-update availability (`DshUpdateInfo` payload).
 pub const DSH_UPDATE_EVENT: &str = "shell://dsh-update";
-/// Ask the frontend to show and remount the setup checklist.
-pub const SETUP_REQUESTED_EVENT: &str = "shell://setup-requested";
+/// Manual app/dsh update-check feedback for the visible update overlay.
+pub const UPDATE_NOTICE_EVENT: &str = "shell://update-notice";
 /// Download progress events for the app updater overlay.
 pub const UPDATER_DOWNLOAD_EVENT: &str = "updater-download-progress";
