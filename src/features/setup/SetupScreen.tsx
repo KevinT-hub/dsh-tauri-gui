@@ -9,7 +9,8 @@ import {
   setShellConfig,
   setUiTheme,
 } from "../../shared/bridge";
-import type { ShellConfig, ShellLogLine, SetupState } from "../../shared/types";
+import type { ShellConfig, ShellLogLine, ShellStatus, SetupState } from "../../shared/types";
+import { shellStatusLabel } from "../../shared/status";
 import DependencyChecklist from "./DependencyChecklist";
 import DependencyDetails from "./DependencyDetails";
 import InstallActionButton from "./InstallActionButton";
@@ -22,6 +23,7 @@ import { canEnter, deriveRows } from "./setupSelectors";
 interface SetupScreenProps {
   logs: ShellLogLine[];
   config: ShellConfig | null;
+  status: ShellStatus;
   onConfigChange: (config: ShellConfig) => void;
   onEntered: () => void;
   detectOnMount: boolean;
@@ -31,6 +33,7 @@ interface SetupScreenProps {
 export default function SetupScreen({
   logs,
   config,
+  status,
   onConfigChange,
   onEntered,
   detectOnMount,
@@ -41,6 +44,7 @@ export default function SetupScreen({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [themeMode, setThemeMode] = useState<ShellConfig["uiTheme"]>("system");
+  const [feedback, setFeedback] = useState<string | null>(null);
   const detectionStarted = useRef(false);
 
   useEffect(() => {
@@ -72,6 +76,7 @@ export default function SetupScreen({
         if (disposed) return;
         setSetup(value);
         setDetectionError(null);
+        setFeedback(value.allPassed ? "环境检测通过，可以进入 DeepSeek Harness" : "检测完成，请根据提示处理缺失依赖");
       })
       .catch((error) => {
         if (disposed) return;
@@ -93,10 +98,16 @@ export default function SetupScreen({
   const activeId = selectedId ?? rows.find((row) => row.rowState !== "passed")?.key ?? rows[0]?.key ?? null;
   const current = rows.find((row) => row.key === activeId) ?? rows[0] ?? null;
 
-  const busyAction = useCallback(async (action: () => Promise<unknown>) => {
+  const busyAction = useCallback(async (action: () => Promise<unknown>, successMessage?: string) => {
     setBusy(true);
+    setFeedback(null);
     try {
       await action();
+      if (successMessage) setFeedback(successMessage);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setFeedback(message);
+      setDetectionError(message);
     } finally {
       setBusy(false);
     }
@@ -105,7 +116,7 @@ export default function SetupScreen({
   const handleThemeMode = useCallback(
     (mode: ShellConfig["uiTheme"]) => {
       setThemeMode(mode);
-      void busyAction(() => setUiTheme(mode));
+      void busyAction(() => setUiTheme(mode), "外观设置已更新");
     },
     [busyAction],
   );
@@ -120,6 +131,7 @@ export default function SetupScreen({
     setSetup(value);
     setDetectionError(null);
     setSelectedId(null);
+    setFeedback(value.allPassed ? "环境检测通过，可以进入 DeepSeek Harness" : "检测完成，请根据提示处理缺失依赖");
   }, []);
 
   const handleDetectionError = useCallback((error: unknown) => {
@@ -133,6 +145,7 @@ export default function SetupScreen({
   const reDetect = useCallback(() => {
     detectionStarted.current = true;
     setBusy(true);
+    setFeedback("正在重新检测环境…");
     void runDetection()
       .then(handleDetectionResult)
       .catch(handleDetectionError)
@@ -145,9 +158,11 @@ export default function SetupScreen({
 
   const handleEnter = useCallback(async () => {
     setBusy(true);
+    setFeedback("正在启动 DeepSeek Harness…");
     try {
       await enterHarness();
       onEntered();
+      setFeedback("引擎已启动，正在加载 Web UI…");
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setDetectionError(message);
@@ -204,12 +219,20 @@ export default function SetupScreen({
             <md-outlined-button onClick={reDetect} disabled={busy}>
               重新检测
             </md-outlined-button>
-            <md-outlined-button onClick={() => void busyAction(restartEngine)} disabled={busy}>
+            <md-outlined-button
+              onClick={() => void busyAction(restartEngine, "引擎已重新启动，正在等待 Web UI")}
+              disabled={busy}
+            >
               重启引擎
             </md-outlined-button>
             <md-text-button onClick={openLogsDir}>打开日志目录</md-text-button>
             <md-text-button onClick={quitApp}>退出</md-text-button>
           </div>
+          {(feedback || (status.phase !== "idle" && status.phase !== "error")) && (
+            <p className="min-w-0 flex-1 text-right text-xs text-[var(--md-on-surface-variant)]">
+              {feedback ?? shellStatusLabel(status)}
+            </p>
+          )}
           {canEnter(setup, busy) && (
             <md-filled-button
               className="animate-pop-in"
