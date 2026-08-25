@@ -1,5 +1,7 @@
+import { useState } from "react";
 import { openLogsDir, quitApp, restartEngine } from "../../shared/bridge";
 import type { ShellStatus } from "../../shared/types";
+import { shellStatusLabel } from "../../shared/status";
 
 interface MinimalSplashProps {
   status: ShellStatus;
@@ -7,6 +9,20 @@ interface MinimalSplashProps {
 
 export default function MinimalSplash({ status }: MinimalSplashProps) {
   const failed = status.phase === "error";
+  const [restarting, setRestarting] = useState(false);
+  const [restartError, setRestartError] = useState<string | null>(null);
+
+  const restart = async () => {
+    setRestarting(true);
+    setRestartError(null);
+    try {
+      await restartEngine();
+      setRestarting(false);
+    } catch (error) {
+      setRestartError(error instanceof Error ? error.message : String(error));
+      setRestarting(false);
+    }
+  };
 
   return (
     <main className="flex h-full flex-col items-center justify-center gap-5 bg-[var(--md-surface-low)] text-[var(--md-on-surface)]">
@@ -19,17 +35,20 @@ export default function MinimalSplash({ status }: MinimalSplashProps) {
       {failed ? (
         <div className="animate-fade-in-up flex max-w-md flex-col items-center gap-3 text-center">
           <p className="text-sm text-[var(--md-error)]">
-            {status.detail ?? status.message}
+            {shellStatusLabel(status)}
           </p>
+          {restartError && <p className="text-sm text-[var(--md-error)]">重启失败：{restartError}</p>}
           <div className="flex gap-2">
-            <md-outlined-button onClick={() => void restartEngine()}>重启引擎</md-outlined-button>
+            <md-outlined-button onClick={() => void restart()} disabled={restarting}>
+              {restarting ? "正在重启…" : "重启引擎"}
+            </md-outlined-button>
             <md-text-button onClick={openLogsDir}>打开日志</md-text-button>
             <md-text-button onClick={quitApp}>退出</md-text-button>
           </div>
         </div>
       ) : (
         <div className="animate-fade-in-up flex flex-col items-center gap-4">
-          <p className="text-sm text-[var(--md-on-surface-variant)]">{status.message}</p>
+          <p className="text-sm text-[var(--md-on-surface-variant)]">{shellStatusLabel(status)}</p>
           <md-circular-progress indeterminate className="h-8 w-8" />
         </div>
       )}
