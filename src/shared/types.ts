@@ -11,7 +11,7 @@ export type ShellPhase =
 
 export interface ShellStatus {
   phase: ShellPhase;
-  message: string;
+  code: ShellStatusCode;
   detail?: string;
   url?: string;
   progress?: number;
@@ -130,12 +130,34 @@ export interface AppUpdateInfo {
   source: string;
 }
 
+export type ShellStatusCode =
+  | "initializing"
+  | "environmentChecking"
+  | "environmentFailed"
+  | "environmentCheckFailed"
+  | "engineStarting"
+  | "engineRestarting"
+  | "engineRestartingAfterCrash"
+  | "engineReady"
+  | "engineReadyExisting"
+  | "engineStopped"
+  | "engineStartFailed"
+  | "engineRestartFailed"
+  | "webUiOpenFailed";
+
 export interface DshUpdateInfo {
   available: boolean;
   currentVersion: string;
   latestVersion: string;
   installCommand: string;
   registry: string;
+}
+
+export interface UpdateNotice {
+  target: "app" | "dsh";
+  phase: "checking" | "latest" | "available" | "installed" | "error";
+  version?: string;
+  error?: string;
 }
 
 export interface DownloadProgressEvent {
