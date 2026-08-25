@@ -18,14 +18,8 @@ pub fn setup_tray(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     let restart = MenuItem::with_id(app, "restart", "重启引擎", true, None::<&str>)?;
     let recheck = MenuItem::with_id(app, "recheck", "重新检测环境", true, None::<&str>)?;
     let check_update = MenuItem::with_id(app, "check-update", "检查更新", true, None::<&str>)?;
-    let check_dsh_update = MenuItem::with_id(
-        app,
-        "check-dsh-update",
-        "检查 DeepSeek Harness 更新",
-        true,
-        None::<&str>,
-    )?;
-    check_dsh_update.set_text("检查 dsh 更新")?;
+    let check_dsh_update =
+        MenuItem::with_id(app, "check-dsh-update", "检查 dsh 更新", true, None::<&str>)?;
     let theme_light = CheckMenuItem::with_id(
         app,
         "theme-light",
@@ -92,32 +86,145 @@ pub fn setup_tray(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
             }
             "open-web" => {
                 let state: Arc<AppState> = app.state::<Arc<AppState>>().inner().clone();
-                let _ = crate::engine::open_web_ui_browser(app, &state);
+                let app = app.clone();
+                std::thread::spawn(move || {
+                    if let Err(err) = crate::engine::open_web_ui_browser(&app, &state) {
+                        crate::app::set_status(
+                            &state,
+                            Some(&app),
+                            "error",
+                            "webUiOpenFailed",
+                            Some(err),
+                            None,
+                            None,
+                            None,
+                        );
+                        crate::engine::navigate_to_shell(&app, &state);
+                    }
+                });
             }
             "restart" => {
                 let state: Arc<AppState> = app.state::<Arc<AppState>>().inner().clone();
                 let app = app.clone();
                 std::thread::spawn(move || {
-                    let _ = crate::engine::restart_engine(&app, &state);
+                    if crate::engine::restart_engine(&app, &state).is_err() {
+                        crate::engine::navigate_to_shell(&app, &state);
+                    }
                 });
             }
             "recheck" => {
                 let state: Arc<AppState> = app.state::<Arc<AppState>>().inner().clone();
                 crate::engine::stop_engine(&state);
+                if let Err(err) = crate::app::config::reset_checklist(&state) {
+                    crate::app::set_status(
+                        &state,
+                        Some(app),
+                        "error",
+                        "environmentCheckFailed",
+                        Some(err),
+                        None,
+                        None,
+                        None,
+                    );
+                    crate::engine::navigate_to_shell(app, &state);
+                    return;
+                }
                 *state.command_spec.lock().unwrap() = None;
                 *state.last_detection.lock().unwrap() = None;
-                let _ = app.emit(crate::app::events::SETUP_REQUESTED_EVENT, ());
+                state
+                    .setup_started
+                    .store(false, std::sync::atomic::Ordering::SeqCst);
+                state
+                    .webui_port_fallback
+                    .store(false, std::sync::atomic::Ordering::SeqCst);
+                crate::app::set_status(
+                    &state,
+                    Some(app),
+                    "bootstrapping",
+                    "environmentChecking",
+                    None,
+                    None,
+                    None,
+                    None,
+                );
+                crate::engine::navigate_to_shell(app, &state);
                 crate::ui::windows::show_main_window(app);
             }
             "check-update" => {
                 let state: Arc<AppState> = app.state::<Arc<AppState>>().inner().clone();
                 let app = app.clone();
-                std::thread::spawn(move || check_app_update_now(app, state));
+                crate::ui::windows::show_main_window(&app);
+                crate::app::set_update_notice(&state, &app, "app", "checking", None, None);
+                std::thread::spawn(move || {
+                    match check_app_update_now(app.clone(), state.clone()) {
+                        Ok(true) => {
+                            let version = state
+                                .app_update
+                                .lock()
+                                .unwrap()
+                                .as_ref()
+                                .map(|info| info.version.clone())
+                                .unwrap_or_default();
+                            crate::app::set_update_notice(
+                                &state,
+                                &app,
+                                "app",
+                                "available",
+                                Some(version),
+                                None,
+                            );
+                        }
+                        Ok(false) => {
+                            crate::app::set_update_notice(&state, &app, "app", "latest", None, None)
+                        }
+                        Err(err) => crate::app::set_update_notice(
+                            &state,
+                            &app,
+                            "app",
+                            "error",
+                            None,
+                            Some(err),
+                        ),
+                    }
+                });
             }
             "check-dsh-update" => {
                 let state: Arc<AppState> = app.state::<Arc<AppState>>().inner().clone();
                 let app = app.clone();
-                std::thread::spawn(move || check_dsh_update_now(app, state));
+                crate::ui::windows::show_main_window(&app);
+                crate::app::set_update_notice(&state, &app, "dsh", "checking", None, None);
+                std::thread::spawn(move || {
+                    match check_dsh_update_now(app.clone(), state.clone()) {
+                        Ok(true) => {
+                            let version = state
+                                .dsh_update
+                                .lock()
+                                .unwrap()
+                                .as_ref()
+                                .map(|info| info.latest_version.clone())
+                                .unwrap_or_default();
+                            crate::app::set_update_notice(
+                                &state,
+                                &app,
+                                "dsh",
+                                "available",
+                                Some(version),
+                                None,
+                            );
+                        }
+                        Ok(false) => {
+                            crate::app::set_update_notice(&state, &app, "dsh", "latest", None, None)
+                        }
+                        Err(err) => crate::app::set_update_notice(
+                            &state,
+                            &app,
+                            "dsh",
+                            "error",
+                            None,
+                            Some(err),
+                        ),
+                    }
+                });
             }
             "theme-light" | "theme-dark" | "theme-system" => {
                 let mode = event.id().as_ref().trim_start_matches("theme-").to_string();
@@ -128,9 +235,6 @@ pub fn setup_tray(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
                 sync_theme_checks(&state);
             }
             "quit" => {
-                let state: Arc<AppState> = app.state::<Arc<AppState>>().inner().clone();
-                crate::engine::stop_engine(&state);
-                app.cleanup_before_exit();
                 app.exit(0);
             }
             _ => {}
@@ -163,10 +267,11 @@ pub fn setup_tray(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
 
 /// App-update probe (GitHub first, mirrors fallback) with the overlay
 /// sync, shared by the startup probe and the tray menu item.
-pub fn check_app_update_now(app: AppHandle, state: Arc<AppState>) {
+pub fn check_app_update_now(app: AppHandle, state: Arc<AppState>) -> Result<bool, String> {
     let result = tauri::async_runtime::block_on(crate::update::checker::check_update());
     match result {
         Ok(info) => {
+            let available = info.available;
             state.logger.info(&format!(
                 "app update check: available={} version={}",
                 info.available, info.version
@@ -174,19 +279,22 @@ pub fn check_app_update_now(app: AppHandle, state: Arc<AppState>) {
             *state.app_update.lock().unwrap() = Some(info.clone());
             let _ = app.emit(crate::app::events::APP_UPDATE_EVENT, info);
             crate::ui::windows::sync_update_overlay(&app);
+            Ok(available)
         }
         Err(err) => {
             state
                 .logger
                 .warn(&format!("app update check failed: {err}"));
+            Err(err)
         }
     }
 }
 
-pub fn check_dsh_update_now(app: AppHandle, state: Arc<AppState>) {
+pub fn check_dsh_update_now(app: AppHandle, state: Arc<AppState>) -> Result<bool, String> {
     let result = tauri::async_runtime::block_on(crate::update::dsh::check_update(&state));
     match result {
         Ok(info) => {
+            let available = info.available;
             if info.available {
                 let mut cached = state.dsh_update.lock().unwrap();
                 *cached = Some(info.clone());
@@ -199,11 +307,13 @@ pub fn check_dsh_update_now(app: AppHandle, state: Arc<AppState>) {
                 state.dsh_update.lock().unwrap().take();
                 state.logger.info("dsh update check: already up to date");
             }
+            Ok(available)
         }
         Err(err) => {
             state
                 .logger
                 .warn(&format!("dsh update check failed: {err}"));
+            Err(err)
         }
     }
 }
