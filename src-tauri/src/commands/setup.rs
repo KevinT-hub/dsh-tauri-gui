@@ -222,8 +222,12 @@ pub fn enter_harness(app: AppHandle) -> Result<(), String> {
         )
     };
     crate::app::config::mark_checklist_completed(&state, &app_version)?;
+    state.stopping.store(false, Ordering::SeqCst);
     match crate::engine::connect_existing_or_spawn(&app, &state) {
-        Ok(_) => Ok(()),
+        Ok(_) => {
+            crate::engine::navigate_when_ready(&app, &state);
+            Ok(())
+        }
         Err(err) => {
             {
                 let mut config = state.config.lock().unwrap();
@@ -266,7 +270,7 @@ pub fn recheck_environment(app: AppHandle) {
                             &state,
                             Some(&app),
                             "error",
-                            "引擎启动失败",
+                            "engineStartFailed",
                             Some(err),
                             None,
                             None,
@@ -278,7 +282,7 @@ pub fn recheck_environment(app: AppHandle) {
                         &state,
                         Some(&app),
                         "error",
-                        "环境检测未通过",
+                        "environmentFailed",
                         Some("缺少必需依赖，请打开主窗口查看详情。".to_string()),
                         None,
                         None,
