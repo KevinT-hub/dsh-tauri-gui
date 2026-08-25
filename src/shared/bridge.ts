@@ -13,6 +13,7 @@ import type {
   ShellLogLine,
   ShellStatus,
   ThemeState,
+  UpdateNotice,
 } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -128,6 +129,10 @@ export function checkAppUpdate(): Promise<AppUpdateInfo> {
   return invoke<AppUpdateInfo>("check_app_update");
 }
 
+export function getAppUpdate(): Promise<AppUpdateInfo | null> {
+  return invoke<AppUpdateInfo | null>("get_app_update");
+}
+
 export function applyAppUpdate(): Promise<void> {
   return invoke("apply_app_update");
 }
@@ -136,8 +141,16 @@ export function installDshUpdate(): Promise<void> {
   return invoke("install_dsh_update");
 }
 
+export function getDshUpdate(): Promise<DshUpdateInfo | null> {
+  return invoke<DshUpdateInfo | null>("get_dsh_update");
+}
+
 export function hideUpdateOverlay(): Promise<void> {
   return invoke("hide_update_overlay");
+}
+
+export function getUpdateNotice(): Promise<UpdateNotice | null> {
+  return invoke<UpdateNotice | null>("get_update_notice");
 }
 
 // ---------------------------------------------------------------------------
@@ -176,8 +189,12 @@ export function onDshUpdate(
   );
 }
 
-export function onSetupRequested(handler: () => void): Promise<UnlistenFn> {
-  return listen("shell://setup-requested", () => handler());
+export function onUpdateNotice(
+  handler: (notice: UpdateNotice) => void,
+): Promise<UnlistenFn> {
+  return listen<UpdateNotice>("shell://update-notice", (event) =>
+    handler(event.payload),
+  );
 }
 
 export function onDownloadProgress(
