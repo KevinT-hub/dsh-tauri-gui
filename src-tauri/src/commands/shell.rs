@@ -77,13 +77,10 @@ pub fn checklist_state(app: AppHandle) -> ChecklistState {
 
 #[tauri::command]
 pub fn shell_ready(app: AppHandle) {
-    // The shell page has painted; only now reveal the checklist window so
-    // there is no black/blank flash on first launch.
-    let state: Arc<AppState> = app.state::<Arc<AppState>>().inner().clone();
-    let checklist = crate::app::config::checklist_required_full(&state);
-    if checklist {
-        crate::ui::windows::show_main_window(&app);
-    }
+    // The shell page has painted. It is also the loading surface while the
+    // engine starts during a normal launch.
+    crate::ui::windows::show_main_window(&app);
+    crate::ui::windows::sync_update_overlay(&app);
 }
 
 #[tauri::command]
@@ -156,13 +153,11 @@ pub fn set_shell_config(app: AppHandle, patch: ShellConfigPatch) -> Result<Shell
 }
 
 #[tauri::command]
-pub fn restart_engine(app: AppHandle) -> Result<(), String> {
+pub async fn restart_engine(app: AppHandle) -> Result<(), String> {
     let state: Arc<AppState> = app.state::<Arc<AppState>>().inner().clone();
-    let app = app.clone();
-    std::thread::spawn(move || {
-        let _ = crate::engine::restart_engine(&app, &state);
-    });
-    Ok(())
+    tauri::async_runtime::spawn_blocking(move || crate::engine::restart_engine(&app, &state))
+        .await
+        .map_err(|err| format!("重启引擎任务异常: {err}"))?
 }
 
 fn open_path(path: &Path) -> Result<(), String> {
@@ -192,9 +187,6 @@ pub fn open_web_ui(app: AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 pub fn quit_app(app: AppHandle) {
-    let state: Arc<AppState> = app.state::<Arc<AppState>>().inner().clone();
-    crate::engine::stop_engine(&state);
-    app.cleanup_before_exit();
     app.exit(0);
 }
 
@@ -216,5 +208,7 @@ pub fn set_ui_theme(app: AppHandle, mode: String) -> Result<theme::ThemeState, S
 
 #[tauri::command]
 pub fn hide_update_overlay(app: AppHandle) {
+    let state: Arc<AppState> = app.state::<Arc<AppState>>().inner().clone();
+    crate::app::clear_update_notice(&state, &app);
     crate::ui::windows::hide_update_overlay(&app);
 }
