@@ -9,7 +9,7 @@
 
 use crate::app::state::AppState;
 use std::io::{Read, Write};
-use std::net::{SocketAddr, TcpStream};
+use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::{AppHandle, Manager};
@@ -18,12 +18,14 @@ use tauri::{AppHandle, Manager};
 /// configured port. If it is, the desktop app connects to it instead of
 /// spawning a second engine, so config/sessions stay in one service area.
 pub fn is_dsh_web_alive(port: u16) -> bool {
+    const CONNECT_TIMEOUT: Duration = Duration::from_millis(250);
+    const IO_TIMEOUT: Duration = Duration::from_millis(500);
     let address = SocketAddr::from(([127, 0, 0, 1], port));
-    let Ok(mut stream) = TcpStream::connect_timeout(&address, Duration::from_millis(800)) else {
+    let Ok(mut stream) = TcpStream::connect_timeout(&address, CONNECT_TIMEOUT) else {
         return false;
     };
-    let _ = stream.set_read_timeout(Some(Duration::from_millis(1200)));
-    let _ = stream.set_write_timeout(Some(Duration::from_millis(800)));
+    let _ = stream.set_read_timeout(Some(IO_TIMEOUT));
+    let _ = stream.set_write_timeout(Some(IO_TIMEOUT));
     let request = format!("GET / HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
     if stream.write_all(request.as_bytes()).is_err() {
         return false;
@@ -42,6 +44,18 @@ pub fn is_dsh_web_alive(port: u16) -> bool {
         }
     }
     head.starts_with("HTTP/") && head.contains("__DSH_BOOT__")
+}
+
+/// Select a local port for a new engine process. A configured port is kept
+/// when available; otherwise the OS assigns a free loopback port.
+pub fn select_port(preferred: u16) -> Result<u16, String> {
+    if preferred != 0 && TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], preferred))).is_ok() {
+        return Ok(preferred);
+    }
+    TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0)))
+        .and_then(|listener| listener.local_addr())
+        .map(|address| address.port())
+        .map_err(|err| format!("cannot allocate a local engine port: {err}"))
 }
 
 /// Only the origin recorded in `ready_url` may be loaded by the main
@@ -73,6 +87,7 @@ pub fn is_allowed_web_url(state: &AppState, url: &str) -> bool {
 /// The shell's own pages (packaged assets or the Vite dev server).
 pub fn is_shell_url(url: &str) -> bool {
     url.starts_with("tauri://localhost")
+        || url.starts_with("http://tauri.localhost")
         || url.starts_with("https://tauri.localhost")
         || url.starts_with("http://localhost:1420")
 }
@@ -81,8 +96,10 @@ pub fn is_shell_url(url: &str) -> bool {
 /// `on_page_load` after the Web UI has painted, so there is no black flash.
 pub fn navigate(app: &AppHandle, url: &str) {
     let url = url.to_string();
+    let log_url = url.clone();
     let app = app.clone();
-    let _ = app.clone().run_on_main_thread(move || {
+    let log_state: Arc<AppState> = app.state::<Arc<AppState>>().inner().clone();
+    let result = app.clone().run_on_main_thread(move || {
         let state: Arc<AppState> = app.state::<Arc<AppState>>().inner().clone();
         if !is_allowed_web_url(&state, &url) {
             state.logger.warn(&format!(
@@ -92,8 +109,41 @@ pub fn navigate(app: &AppHandle, url: &str) {
         }
         if let Some(window) = app.get_webview_window("main") {
             if let Ok(parsed) = url::Url::parse(&url) {
-                let _ = window.navigate(parsed);
+                if let Err(err) = window.navigate(parsed) {
+                    state
+                        .logger
+                        .warn(&format!("WebView navigation failed for {url}: {err}"));
+                }
             }
+        }
+    });
+    if let Err(err) = result {
+        log_state.logger.warn(&format!(
+            "could not schedule WebView navigation to {log_url}: {err}"
+        ));
+    }
+}
+
+/// Return the WebView to the shell and force a fresh frontend mount. The
+/// official dsh page replaces the shell React tree, so shell events cannot be
+/// delivered until this navigation has completed.
+pub fn navigate_to_shell(app: &AppHandle, state: &Arc<AppState>) {
+    let mut url = match url::Url::parse(&state.shell_url) {
+        Ok(url) => url,
+        Err(err) => {
+            state.logger.warn(&format!("invalid shell URL: {err}"));
+            return;
+        }
+    };
+    let revision = state
+        .setup_revision
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+        + 1;
+    url.set_query(Some(&format!("setup={revision}")));
+    let app = app.clone();
+    let _ = app.clone().run_on_main_thread(move || {
+        if let Some(window) = app.get_webview_window("main") {
+            let _ = window.navigate(url);
         }
     });
 }
@@ -105,6 +155,7 @@ mod tests {
     #[test]
     fn shell_urls_are_recognized() {
         assert!(is_shell_url("tauri://localhost"));
+        assert!(is_shell_url("http://tauri.localhost/"));
         assert!(is_shell_url("https://tauri.localhost"));
         assert!(is_shell_url("http://localhost:1420/"));
         assert!(!is_shell_url("http://127.0.0.1:3080/"));
