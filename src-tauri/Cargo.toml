@@ -1,6 +1,6 @@
 [package]
 name = "dsh-tauri-gui"
-version = "0.2.0"
+version = "0.2.1"
 description = "dsh-tauri-gui - zero-dependency Tauri wrapper"
 authors = ["KevinT-hub"]
 license = "MIT"
